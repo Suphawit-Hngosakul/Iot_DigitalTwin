@@ -1,0 +1,77 @@
+# ── Secrets (ห้าม commit) ─────────────────────────
+.env
+.env.*
+!.env.example
+**/secrets.h
+*.pem
+*.key
+*.p12
+*.crt
+device-tokens*.json
+
+# ── Terraform / OpenTofu ──────────────────────────
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+crash.log
+
+# ── AWS SAM / build ───────────────────────────────
+.aws-sam/
+samconfig.toml
+build/
+dist/
+*.zip
+
+# ── Python ────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# ── Node / web ────────────────────────────────────
+node_modules/
+.next/
+.cache/
+
+# ── Arduino / PlatformIO ──────────────────────────
+.pio/
+*.elf
+*.bin
+*.hex
+
+# ── ข้อมูลจริง (เก็บใน S3 ไม่ใช่ git) ───────────────
+data/
+*.wav
+*.parquet
+iot/simulator/out/
+
+# ── OS / editor ───────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# ── Claude (เก็บไว้ในเครื่องเท่านั้น) ───────────────
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+
+# ── ข้อมูล GIS ที่ห้ามเผยแพร่ (building.shp, bounary.shp ของ กทม.) ──
+*.shp
+*.shx
+*.dbf
+*.sbn
+*.sbx
+*.cpg
+*.prj
+*.shp.xml
+*.gpkg
+*.geojson
+!web/public/**/*.geojson
