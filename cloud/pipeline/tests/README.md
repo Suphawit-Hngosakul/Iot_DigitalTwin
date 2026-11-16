@@ -7,13 +7,14 @@ pip install pytest pyarrow
 python -m pytest -q
 ```
 
-ไม่ต้องต่อ AWS ทุก test อ่านแค่ไฟล์ในเครื่อง `conftest.py` เพิ่ม `cloud/pipeline` เข้า `sys.path` จึง `from common import schema` ได้
+ไม่ต้องต่อ AWS ทุก test อ่านแค่ไฟล์ในเครื่อง (test ของกริดใช้ `pyproj`: `pip install pyproj`) `conftest.py` เพิ่ม `cloud/pipeline` เข้า `sys.path` จึง `from common import schema` ได้
 
 ## Fixture
 
 | ไฟล์ | มีอะไร |
 |---|---|
 | `fixtures/good.csv` | 4 แถวจาก IOTW-A001: แถว 1–2 ปกติ, แถว 3 ไมค์/DHT/GPS เสีย (`SPL_ERR;DHT_ERR;GPS_MISSING` ค่าว่าง), แถว 4 HDOP 6.5 (`GPS_POOR`) |
+| `fixtures/communities.csv` | 36 ชุมชนจาก CS341-RONNAI `gee/communities.csv` (BMA open data) |
 | `fixtures/no_rtc.csv` | 2 แถวจาก IOTW-A002 ที่เวลาเชื่อไม่ได้: DateTime เป็นเลข `12345` และ `2000-01-01 00:00:05` + `Time_Valid=0` |
 
 ## test_schema.py (37 ข้อ)
@@ -77,6 +78,37 @@ python -m pytest -q
 | `test_devices_csv_loads` | ไฟล์จริงโหลดได้ มี IOTW-A001, IOTW-A002 เป็น Mobile |
 | `test_lookup_device_moves_mid_day` | station ย้ายจุดเที่ยงวัน: 11:59 ได้จุด A, 12:00 ได้จุด B, ก่อนติดตั้งและเครื่องที่ไม่มีในทะเบียน → None |
 | `test_station_without_coords_is_rejected` | Stationary ที่ไม่มีพิกัด → error บอกเลขบรรทัด |
+
+## test_grid.py — กริด 90 m (`common/grid.py`)
+
+| test | ตรวจอะไร |
+|---|---|
+| `test_cell_id_roundtrip` / `test_bad_cell_id` | `c0012_r0345` สร้างและแยกกลับได้, รูปแบบผิด → error |
+| `test_origin_on_landsat_lattice` | origin อยู่บนขอบพิกเซล Landsat (…15 m) และ 90 หาร 30 ลงตัว |
+| `test_xy_to_cell_and_bounds` | พิกัด → เซลล์ถูก และขอบเซลล์ถูก |
+| `test_point_on_edge_goes_east_and_south` | จุดบนเส้นแบ่งไปเซลล์ทางตะวันออก/ใต้ |
+| `test_outside_grid_is_none` | จุดนอกกริดหรือไม่มีพิกัด → None |
+| `test_every_cell_center_maps_back` | จุดกลางเซลล์แปลงกลับได้เซลล์เดิม |
+| `test_latlon_roundtrip_and_aoi_inside_grid` | ชุมชนสุดขอบ (หลักสี่ใต้สุด, ดอนเมือง) อยู่ในกริด และแปลง lat/lon ไปกลับได้ |
+| `test_cells_in_circle_area_matches_circle` | พื้นที่รวม (น้ำหนัก × เซลล์) ของ buffer 300/500 m ต่างจาก πr² ไม่เกิน 2% |
+| `test_cells_in_circle_rejects_bad_radius` | รัศมี 0 หรือวงกลมเลยขอบกริด → error |
+
+## test_satellite_schema.py — ดาวเทียม + ชุมชน (`common/satellite_schema.py`)
+
+| test | ตรวจอะไร |
+|---|---|
+| `test_periods` / `test_bad_period` | `scene_2026-03-15`, `season_2026_03-05`, `year_2026` ได้วันที่เริ่ม/จบถูก, รูปแบบผิด → error |
+| `test_good_satellite_row` / `test_satellite_row_problems` | ค่านอกช่วง, cell_id ผิด, วันที่ไม่ตรง period, p90 < mean ถูกจับได้ |
+| `test_scene_row_counts_one_date` | แถวรายฉากต้องมี n_scenes 0 หรือ 1 (ภาพวันเดียวกันจาก 2 row นับครั้งเดียว) |
+| `test_clean_nulls_low_coverage` | พิกเซลใช้ได้ < 50% ของเซลล์ → ค่าดาวเทียมเป็น null |
+| `test_tables_do_not_repeat_partition_keys` / `test_arrow_schema` | ตารางไม่ซ้ำคอลัมน์ partition และสร้าง pyarrow schema ได้ |
+| `test_load_real_communities` | โหลด `fixtures/communities.csv` (36 ชุมชน หลักสี่ + ดอนเมือง) ได้ |
+| `test_load_communities_rejects_duplicates` | community_id ซ้ำ → error |
+| `test_buffer_cells_for_every_community` | ทุกชุมชนได้เซลล์ ≈ 35 (300 m) และ ≈ 97 (500 m) |
+| `test_weighted_helpers` | ค่าเฉลี่ยถ่วงน้ำหนักและ quantile ถ่วงน้ำหนักถูก |
+| `test_summarize_community` | สรุปชุมชน 3 เซลล์ (1 เซลล์เมฆบัง, 1 เซลล์ไม่มีข้อมูลอาคาร) ได้ lst_mean, p90, n_scenes, builtup_pct, building_count ตามคำนวณมือ |
+| `test_summarize_without_buildings_and_missing_cells` | ไม่มีข้อมูลดาวเทียม/อาคาร → null, ไม่มีเซลล์ → error |
+| `test_s3_keys` | path ของ raw/processed ถูกรูป และชื่อผิด → error |
 
 ## ยังไม่มี (ต้องทำก่อนปิด #2)
 
