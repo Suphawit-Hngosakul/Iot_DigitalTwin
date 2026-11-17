@@ -4,12 +4,18 @@ variable "bucket_name" {
   type = string
 }
 
-resource "aws_s3_bucket" "data" {
-  bucket = var.bucket_name
+# Learner Lab: the bucket is created OUTSIDE Terraform (aws s3 mb, see
+# cloud/infra/README.md). The aws_s3_bucket resource always reads the bucket's
+# Object Lock configuration, and the Learner Lab SCP denies
+# s3:GetBucketObjectLockConfiguration (403) -> apply fails. So Terraform only
+# manages the settings below, on a bucket that already exists.
+locals {
+  bucket_name = var.bucket_name
+  bucket_arn  = "arn:aws:s3:::${var.bucket_name}"
 }
 
 resource "aws_s3_bucket_public_access_block" "data" {
-  bucket                  = aws_s3_bucket.data.id
+  bucket                  = local.bucket_name
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
@@ -17,14 +23,14 @@ resource "aws_s3_bucket_public_access_block" "data" {
 }
 
 resource "aws_s3_bucket_ownership_controls" "data" {
-  bucket = aws_s3_bucket.data.id
+  bucket = local.bucket_name
   rule {
     object_ownership = "BucketOwnerEnforced"
   }
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "data" {
-  bucket = aws_s3_bucket.data.id
+  bucket = local.bucket_name
   rule {
     apply_server_side_encryption_by_default {
       sse_algorithm = "AES256"
@@ -33,9 +39,9 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "data" {
 }
 
 output "bucket_name" {
-  value = aws_s3_bucket.data.bucket
+  value = local.bucket_name
 }
 
 output "bucket_arn" {
-  value = aws_s3_bucket.data.arn
+  value = local.bucket_arn
 }

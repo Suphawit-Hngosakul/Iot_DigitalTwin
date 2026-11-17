@@ -6,3 +6,8 @@ device_token_hashes = {
   "<sha256-of-token-walk-01>" = "IOTW-A001"
   "<sha256-of-token-walk-02>" = "IOTW-A002"
 }
+
+# EC2 relay ให้บอร์ดส่ง HTTP (บอร์ดไม่มี RAM ทำ TLS) ปิด = false
+relay_enabled = true
+# เปิด port 22 ให้ EC2 Instance Connect ดู log ได้ (ว่าง = ปิด)
+# relay_ssh_cidrs = ["18.206.107.24/29"]

@@ -33,3 +33,13 @@ module "ingest" {
   source_dir          = "${path.root}/../ingest"
   common_dir          = "${path.root}/../pipeline/common"
 }
+
+# Plain HTTP relay for boards without RAM for TLS (decision 2026-11-17).
+module "relay" {
+  count        = var.relay_enabled ? 1 : 0
+  source       = "./modules/relay"
+  name_prefix  = var.name_prefix
+  upstream_url = module.ingest.ingest_url
+  source_dir   = "${path.root}/../relay"
+  ssh_cidrs    = var.relay_ssh_cidrs
+}
