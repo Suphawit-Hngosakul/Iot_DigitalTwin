@@ -1,0 +1,83 @@
+"""CheckBatch Lambda (issue #12, spec 30 §4).
+
+Input : {"batch_id": "IOTW-A001__2026-11-16__14", "mode": "normal" | "force"}
+Output: the input plus
+        {"check": {"status": ..., "manifest": [{key, etag, size}], "manifest_hash": ...,
+                   "reason": ...}}
+
+status:
+  INVALID_INPUT      batch_id malformed or unknown mode
+  NO_DATA            no raw file under the batch prefix
+  ALREADY_PROCESSED  manifest hash equals the published one (mode != force)
+  NEW                never published
+  CHANGED            published, but files were added/replaced since (e.g. backfill),
+                     or mode == force
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+
+import boto3
+
+from common import batch_manifest, schema
+
+log = logging.getLogger()
+log.setLevel(logging.INFO)
+
+MODES = ("normal", "force")
+
+INVALID_INPUT = "INVALID_INPUT"
+NO_DATA = "NO_DATA"
+ALREADY_PROCESSED = "ALREADY_PROCESSED"
+NEW = "NEW"
+CHANGED = "CHANGED"
+
+_s3 = None
+
+
+def _client():
+    global _s3
+    if _s3 is None:
+        _s3 = boto3.client("s3")
+    return _s3
+
+
+def check(s3, bucket: str, batch_id, mode) -> dict:
+    """Decide what to do with one batch. Never raises for bad input."""
+    if mode not in MODES:
+        return {"status": INVALID_INPUT, "reason": f"unknown mode {mode!r}"}
+    if not isinstance(batch_id, str):
+        return {"status": INVALID_INPUT, "reason": "batch_id missing"}
+    try:
+        schema.parse_batch_id(batch_id)
+    except ValueError as e:
+        return {"status": INVALID_INPUT, "reason": str(e)}
+
+    files = batch_manifest.list_raw_files(s3, bucket, batch_id)
+    if not files:
+        return {"status": NO_DATA, "manifest": [], "manifest_hash": None}
+
+    digest = batch_manifest.manifest_hash(files)
+    out = {"manifest": files, "manifest_hash": digest}
+    published = batch_manifest.read_published(s3, bucket, batch_id)
+    if published is None:
+        return {"status": NEW, **out}
+    if mode == "force":
+        return {"status": CHANGED, "reason": "mode=force", **out}
+    if published.get("manifest_hash") == digest:
+        return {"status": ALREADY_PROCESSED, **out}
+    return {"status": CHANGED, "reason": "raw files differ from published manifest", **out}
+
+
+def handler(event, context=None):
+    batch_id = event.get("batch_id")
+    mode = event.get("mode") or "normal"
+    result = check(_client(), os.environ["DATA_BUCKET"], batch_id, mode)
+    log.info(json.dumps({
+        "batch_id": batch_id, "mode": mode, "status": result["status"],
+        "files": len(result.get("manifest", [])), "reason": result.get("reason"),
+    }))
+    return {**event, "batch_id": batch_id, "mode": mode, "check": result}

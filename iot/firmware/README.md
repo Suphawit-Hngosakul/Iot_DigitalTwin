@@ -77,7 +77,7 @@ iot/firmware/
 
 | ค่า | ตอนนี้ | ความหมาย |
 |---|---|---|
-| `DEVICE_ID` | `""` | ชื่อเครื่องใน CSV เช่น `walk-01`, `station-01` (A-Z a-z 0-9 - _ ≤ 16 ตัว) ว่าง = `IOTW-` + 3 byte ท้ายของ MAC |
+| `DEVICE_ID` | `""` | ชื่อเครื่องใน CSV เช่น `IOTW-A001` (ต้องตรงกับ `devices.csv`) (A-Z a-z 0-9 - _ ≤ 16 ตัว) ว่าง = `IOTW-` + 3 byte ท้ายของ MAC |
 | `DEVICE_TYPE` | `1` | 0 = Stationary, 1 = Mobile |
 | `MIC_OFFSET_DB` | `123.2` | แปลง dBFS → dB (ใช้ทั้ง dB SPL และ dBA) — ข้อ 3.1 |
 | `DHT_TEMP_OFFSET` / `DHT_HUMID_OFFSET` | `-0.24` / `-6.0` | บวกเข้ากับค่าที่อ่านได้ |
