@@ -20,5 +20,5 @@ pipeline_schedule_enabled = true                # false = รันมืออ�
 pandas_layer_arn = "arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:<version>"
 
 # Glue + Athena (#17) ไม่ต้องใส่ก็ได้ ใช้ค่า default
-# catalog_date_start          = "2025-01-01"   # วันแรกที่ตารางมองเห็น (เวลาไทย)
+# catalog_date_start          = "2026-11-01"   # วันแรกที่ตารางมองเห็น (เวลาไทย) ยิ่งเก่า query ที่ไม่กรอง date ยิ่งช้า
 # athena_bytes_scanned_cutoff = 1073741824     # query สแกนเกิน 1 GiB ถูกยกเลิก
