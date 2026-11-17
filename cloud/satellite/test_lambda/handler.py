@@ -33,11 +33,13 @@ def _init_gee() -> None:
 
     project = os.environ.get("GEE_PROJECT", DEFAULT_PROJECT)
     config_path = Path(__file__).parent / CONFIG_FILENAME
+    if not config_path.exists():
+        config_path = Path.cwd() / CONFIG_FILENAME
 
     if not config_path.exists():
         raise FileNotFoundError(f"WIF config not found at {config_path}")
 
-    log.info("Loading WIF config from %s for project %s", config_path.name, project)
+    log.info("Loading WIF config from %s for project %s", config_path, project)
     with open(config_path, encoding="utf-8") as f:
         info = json.load(f)
 
@@ -58,6 +60,17 @@ def lambda_handler(event: dict[str, Any] | None = None, context: Any = None) -> 
     """Execute GEE verification (issue #25) or scene ingest into S3 (issue #27)."""
     event = event or {}
 
+    # ALWAYS initialize GEE with WIF credentials first!
+    try:
+        _init_gee()
+    except Exception as exc:
+        log.exception("Error initializing GEE with WIF: %s", exc)
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"status": "error", "message": f"GEE Auth Error: {exc}"}),
+        }
+
     # If action is ingest or date_start provided, run full satellite ingest
     if event.get("action") == "ingest" or "date_start" in event:
         log.info("Delegating to ingest pipeline handler...")
@@ -66,8 +79,6 @@ def lambda_handler(event: dict[str, Any] | None = None, context: Any = None) -> 
 
     # Otherwise default to Issue #25 verification test
     try:
-        _init_gee()
-
         # 1. Basic calculation test (1 + 1 = 2)
         num_test = ee.Number(1).add(1).getInfo()
         log.info("Test 1+1 = %s", num_test)

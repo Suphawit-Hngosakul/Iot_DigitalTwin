@@ -4,7 +4,6 @@ Fetches Landsat 8 & 9 Collection 2 Level 2 scenes over Lak Si AOI.
 For each scene with cloud coverage <= MAX_CLOUD_PCT (40%):
   - bands.tif      (GeoTIFF 30m in EPSG:32647 with bands: lst_c, ndvi, ndbi, cloud_mask)
   - metadata.json  (scene ID, acquisition time, cloud %, sensor, formulas)
-  - pixels.csv     (30m pixel table with coordinates and band values)
   - _COMPLETE      (marker indicating upload completion)
 
 Saved to S3 under raw/satellite/scene_<YYYY-MM-DD>/
@@ -59,6 +58,14 @@ def init_gee(config_dir: Path | None = None) -> None:
     if _INITIALIZED:
         return
 
+    # If ee was already initialized (e.g. by handler.py), don't re-initialize
+    try:
+        if getattr(ee.data, "_credentials", None) is not None:
+            _INITIALIZED = True
+            return
+    except Exception:
+        pass
+
     project = os.environ.get("GEE_PROJECT", DEFAULT_PROJECT)
 
     # Search for WIF config in multiple locations
@@ -86,11 +93,12 @@ def init_gee(config_dir: Path | None = None) -> None:
             ],
         )
         ee.Initialize(credentials, project=project)
+        _INITIALIZED = True
     else:
         log.info("No WIF config found; initializing GEE using ambient credentials")
         ee.Initialize(project=project)
+        _INITIALIZED = True
 
-    _INITIALIZED = True
     log.info("Google Earth Engine initialized successfully (project: %s)", project)
 
 
@@ -128,10 +136,9 @@ def check_scene_completed(bucket: str, prefix: str) -> bool:
         s3.head_object(Bucket=bucket, Key=f"{prefix}_COMPLETE")
         return True
     except ClientError as e:
-        if e.response["Error"]["Code"] in ("404", "NoSuchKey"):
+        if e.response["Error"]["Code"] in ("404", "NoSuchKey", "403"):
             return False
-        # If access is forbidden or bucket not accessible, raise
-        raise
+        return False
 
 
 def ingest_scene(scene: ee.Image, roi: ee.Geometry, bucket: str, dry_run: bool = False) -> dict[str, Any]:
