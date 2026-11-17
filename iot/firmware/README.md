@@ -220,7 +220,21 @@ iot/firmware/
 
 `uploadTask` ส่ง CSV บน SD ไปที่ ingest (`cloud/ingest/`, สเปค 20) ทีละก้อน ≤ 300 แถว เน็ตหลุดนานแค่ไหน พอกลับมาจะส่งย้อนหลังจากไฟล์เก่าสุดก่อนจนครบ แล้วตามไฟล์ที่กำลังเขียน
 
-**เปิดใช้:** ใส่ `DEVICE_TOKEN` ใน `secrets.h` (สร้างด้วย `python cloud/ingest/make_token.py <device_id>`) และ `ingest_url` ในหน้า Setup (หรือ `INGEST_URL` ใน `secrets.h`) เป็น `http://<relay-ip>:8080/ingest` จาก `terraform output relay_url` — ว่างอย่างใดอย่างหนึ่ง = ไม่อัป `Device ID` ของเครื่องต้องตรงกับที่ใช้สร้าง token
+**เปิดใช้ (ทีละขั้น):**
+
+1. `python cloud/ingest/make_token.py <device_id>` → ได้ 2 ค่า
+   - `token :` ยาว **43 ตัว** (A-Z a-z 0-9 `-` `_`) → `secrets.h`: `#define DEVICE_TOKEN "..."`
+   - `tfvars :` hash ยาว **64 ตัว** (0-9 a-f) → `cloud/infra/terraform.tfvars` แล้ว `terraform apply`
+   - **อย่าสลับ:** ใส่ hash ใน `secrets.h` = ได้ 401 ตลอด · เช็กว่าคู่กัน: `echo -n '<token>' | sha256sum` ต้องได้ hash ตัวเดียวกับใน tfvars
+2. Ingest URL = `terraform output relay_url` (`http://<relay-ip>:8080/ingest`) ตั้งในหน้า Setup หรือ `INGEST_URL` ใน `secrets.h` — **ค่าที่บันทึกในหน้า Setup (NVS) ทับค่าใน `secrets.h`** ถ้าเคยบันทึกไว้ต้องแก้ในหน้า Setup
+3. `Device ID` ของเครื่องต้องตรงกับที่ใช้สร้าง token
+4. flash แล้วดู Serial: `[CFG] INGEST='http://...' ... TOKEN=set` → `[UPL] POST <chunk> ... code=200`
+
+ว่าง Ingest URL หรือ `DEVICE_TOKEN` อย่างใดอย่างหนึ่ง = ไม่อัป
+
+**ส่งบ่อยแค่ไหน:** เขียน SD ทุก 1 วินาที แต่ส่งเป็นก้อน — ช่วงส่งย้อนหลัง ก้อนละ 300 แถวทุก ~10 วินาที · ตามทันแล้ว รอครบ 300 แถว (~5 นาทีที่ CSV=1000ms) หรือส่งเท่าที่มีเมื่อครบ `UPLOAD_PARTIAL_MS` → ~12–13 ไฟล์/ชั่วโมง/เครื่อง (~32 KB/ไฟล์) ข้อมูลบน S3 ช้ากว่าจริง ~5 นาที (realtime เป็นงาน #6)
+
+**ปลายทางบน S3:** `raw/csv/device_id=<id>/date=<YYYY-MM-DD>/hour=<HH>/part-<session>-<first>-<last>.csv` (วัน/ชั่วโมงตาม DateTime ในแถว เวลาไทย) ก้อนที่คร่อมชั่วโมงถูก ingest แยกเป็นไฟล์ชื่อเดียวกันในแต่ละชั่วโมง · pipeline (สเปค 30) รวมเป็น Parquet รายชั่วโมงทีหลัง
 
 **ไฟล์บน SD ที่ uploader สร้าง:**
 
@@ -240,7 +254,8 @@ iot/firmware/
 | อาการ | วิธีแก้ |
 |---|---|
 | `[UPL] CSV upload off` | ยังไม่ได้ใส่ `ingest_url` หรือ `DEVICE_TOKEN` |
-| `code=401` แล้ว `upload stopped` | token ผิด / hash ยังไม่อยู่ใน `device_token_hashes` ของ Terraform |
+| `code=401` แล้ว `upload stopped` | token ผิด / hash ยังไม่อยู่ใน `device_token_hashes` ของ Terraform / ใส่ hash (64 ตัว) แทน token (43 ตัว) ใน `secrets.h` → แก้แล้ว flash (401 = หยุดจนรีบูต) |
+| `[CFG] INGEST=` ยังเป็นค่าเก่า | ค่าในหน้า Setup (NVS) ทับ `secrets.h` → แก้ในหน้า Setup แล้วรีบูต |
 | `code=403` ทุกก้อน | `Device ID` ของเครื่องไม่ตรงกับ token → แก้ในหน้า Setup ให้ตรง แล้วลบ `.idx` ของไฟล์ที่โดนข้าม |
 | `code=-1` / `SSL - Memory allocation failed` / `X509 - Allocation of memory failed` | ยังตั้ง URL เป็น `https://` → เปลี่ยนเป็น `relay_url` (`http://…:8080/ingest`) |
 | `code=-1 connection refused` กับ `http://` | EC2 relay ดับ (Learner Lab หมด session) หรือ IP ผิด → เปิด lab ใหม่, `curl http://<ip>:8080/health` |
