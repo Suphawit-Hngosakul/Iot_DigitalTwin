@@ -3,11 +3,11 @@
 รัน (จากโฟลเดอร์ `cloud/pipeline`):
 
 ```
-pip install pytest pyarrow
+pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-ไม่ต้องต่อ AWS ทุก test อ่านแค่ไฟล์ในเครื่อง (test ของกริดใช้ `pyproj`: `pip install pyproj`) `conftest.py` เพิ่ม `cloud/pipeline` เข้า `sys.path` จึง `from common import schema` ได้
+ไม่ต้องต่อ AWS: test ของ Lambda ใช้ moto จำลอง S3 (test ของกริดใช้ `pyproj`: `pip install pyproj`) `conftest.py` เพิ่ม `cloud/pipeline` เข้า `sys.path` จึง `from common import schema` ได้
 
 ## Fixture
 
@@ -24,7 +24,7 @@ python -m pytest -q
 | test | ตรวจอะไร |
 |---|---|
 | `test_header_ok` | header ตรง `CSV_COLUMNS` → ไม่มีปัญหา |
-| `test_header_matches_firmware_source` | อ่าน header จาก `iot/firmware/main/sd_logger.cpp` โดยตรง ต้องตรงกับ `CSV_COLUMNS` ทุกตัวและทุกลำดับ (ถ้าไม่มีโฟลเดอร์ firmware จะข้าม) **firmware เปลี่ยนคอลัมน์แล้วลืมแก้ schema.py ข้อนี้จะแดง** |
+| `test_header_matches_firmware_source` | อ่าน `CSV_HEADER` จาก `iot/firmware/main/sd_logger.h` โดยตรง ต้องตรงกับ `CSV_COLUMNS` ทุกตัวและทุกลำดับ (ถ้าไม่มีโฟลเดอร์ firmware จะข้าม) **firmware เปลี่ยนคอลัมน์แล้วลืมแก้ schema.py ข้อนี้จะแดง** |
 | `test_header_missing_column` | ขาด `Lux` → `missing columns: Lux` |
 | `test_header_extra_column` | มีคอลัมน์เกิน → `unexpected columns: Foo` |
 | `test_header_swapped` | สลับ dBA กับ dB_SPL → `columns out of order` |
@@ -113,3 +113,27 @@ python -m pytest -q
 ## ยังไม่มี (ต้องทำก่อนปิด #2)
 
 - fixture จาก CSV จริงของเครื่อง 1 ไฟล์ (~20 แถว)
+
+## test_plan_batches.py (#11/#12, D21)
+
+| test | ตรวจอะไร |
+|---|---|
+| `test_scheduled_time_is_thai_hour` | 18:05 UTC → ชั่วโมง H = 01:00 เวลาไทยวันถัดไป |
+| `test_lookback_crosses_midnight` | ย้อนหลัง 3 ชม. จาก 01:00 ได้ 22, 23, 00 ของวันก่อน |
+| `test_only_hours_with_data` | ส่งเฉพาะชั่วโมงที่มีไฟล์ใน raw เรียงเก่า → ใหม่ |
+| `test_current_hour_and_outside_window_excluded` | ไม่เอาชั่วโมง H (ยังเขียนอยู่) และ H-25 |
+| `test_unknown_partition_ignored` | `date=unknown` ไม่กลายเป็น batch |
+| `test_inactive_device_skipped` | เครื่องที่ `valid_to` หมดแล้วไม่ถูกนับ |
+| `test_handler_scheduled` / `test_handler_uses_real_devices_csv` | input จาก Scheduler → output ที่ Map ใช้ |
+| `test_manual_batch_ids_pass_unfiltered` | รันมือ: `batch_ids` ผ่านตามที่ส่ง (Check ตัดสินเอง) |
+
+## test_check_batch.py (#12)
+
+| test | สถานะที่คาด |
+|---|---|
+| `test_invalid_input` (5 กรณี) | INVALID_INPUT: รูปแบบเก่า `/`, ชั่วโมง 24, เดือน 13, ไม่มี batch_id, mode `correction` |
+| `test_no_data`, `test_neighbour_hour_and_unknown_are_not_this_batch` | NO_DATA (ไฟล์ชั่วโมงข้างๆ/เครื่องอื่น/unknown ไม่นับ) |
+| `test_new_lists_files_sorted`, `test_force_on_unpublished_is_new` | NEW + manifest เรียงตาม key |
+| `test_already_processed`, `test_resend_same_chunk_is_still_processed` | ALREADY_PROCESSED (ส่งก้อนเดิมซ้ำไม่ทำให้รันใหม่) |
+| `test_backfill_chunk_makes_changed`, `test_replaced_content_makes_changed`, `test_force_on_published_is_changed` | CHANGED |
+| `test_hash_ignores_order_and_size` | hash ไม่ขึ้นกับลำดับ |
