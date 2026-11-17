@@ -18,6 +18,7 @@ iot/firmware/
     ├── rtc_helper.h/.cpp   # DS3231: อ่าน/ตั้งเวลา, Time_Valid, ตั้งจากเวลา GPS, สร้างชื่อไฟล์/โฟลเดอร์, มาโคร LOG()
     ├── audio_engine.h/.cpp # ไมค์ INMP441 (I2S): micTask, header WAV, init ไดรเวอร์ใหม่เมื่อ error
     ├── sd_logger.h/.cpp    # หัวใจการบันทึก: mount SD, คำนวณ dB SPL/dBA, เขียน WAV + CSV + Flags, remount, sdProcessTask
+    ├── csv_uploader.h/.cpp # อัป CSV จาก SD ขึ้น ingest ตาม cursor `.idx` + backfill: uploadTask (ข้อ 7)
     ├── sensors.h/.cpp      # BH1750 (กรอง median+EMA, คาลิเบต) และ DHT22 (offset): luxTask, dhtTask
     ├── gps_handler.h/.cpp  # GPS NEO-8M (UART2 + TinyGPSPlus): gpsProbe ตอนบูต, gpsTask
     └── oled_display.h/.cpp # จอ SH1106 (U8g2): หน้าสถานะตอนบูต และ oledTask หน้าหลัก
@@ -96,7 +97,8 @@ iot/firmware/
 | SD | `SD_ERROR_THRESHOLD` / `SD_REMOUNT_INTERVAL_MS` | 10 ครั้ง / 10 s |
 | Data Quality | `SPL_MIN_DB`–`SPL_MAX_DB`, `TEMP_MIN_C`–`TEMP_MAX_C`, `HUMID_*`, `LUX_RAW_MAX`, `GPS_MAX_HDOP`, `SPL_STALE_MS`, `TIME_MIN_YEAR` | 30–120 dB, −40–80 °C, 0–100 %, 54612, 5, 3000 ms, 2025 |
 | ระบบ | `WDT_TIMEOUT_S` / `I2S_ERROR_THRESHOLD` / `GPS_VALID_TIMEOUT_MS` / `SENSOR_WARMUP_SEC` | 10 / 50 / 5000 / 3 |
-| Stack | `STACK_MIC`, `STACK_SD_PROCESS`, `STACK_GPS`, `STACK_LUX`, `STACK_DHT`, `STACK_OLED` | 20000, 20000, 4096 ×3, 8192 |
+| Stack | `STACK_MIC`, `STACK_SD_PROCESS`, `STACK_GPS`, `STACK_LUX`, `STACK_DHT`, `STACK_OLED`, `STACK_NET`, `STACK_UPLOAD` | 4096, 6144, 3072/4096/3072, 4096, 4096, 8192 (ลดตาม spike #4 + ค่า `[STACK]` จากบอร์ดจริง ให้มี RAM พอทำ TLS — ดู `[STACK]` ใน Serial) |
+| อัป CSV | `UPLOAD_*`, `HTTP_TIMEOUT_MS` | ดูข้อ 7 |
 | Setup Mode | `CONFIG_AP_SSID` / `CONFIG_AP_PASS` / `CONFIG_PORTAL_TIMEOUT_MS` / `CONFIG_BUTTON_PIN` | IoT-Walking-Setup / walking123 / 5 นาที / GPIO0 |
 
 ### 2.3 เวลาบน SD (`DateTime`)
@@ -186,7 +188,9 @@ iot/firmware/
 |---|---|---|
 | `[CFG]` | ตอนบูต | ค่าที่ใช้จริง (หลังรวม NVS) เช่น `MIC_OFFSET=123.20dB` |
 | `[INFO]` | ทั่วไป | ขั้นบูต, `Recording: /20261117/14/audio_....wav`, `Recording complete` (ขนาด / ความยาว / dropped blocks) |
-| `[STAT]` | ทุก 10 s | `Heap` (ควรนิ่ง ไม่ลดเรื่อย ๆ), `SDFree`, `SPL:..dB (A ..dBA)`, Lux, Temp, Humi, `GPS:FIX/NoFx` + ดาวเทียม + HDOP, `SD:OK/NONE`, `Rec:YES/No` |
+| `[STAT]` | ทุก 10 s | `Heap` (ควรนิ่ง ไม่ลดเรื่อย ๆ), `SDFree`, `SPL:..dB (A ..dBA)`, Lux, Temp, Humi, `GPS:FIX/NoFx` + ดาวเทียม + HDOP, `SD:OK/NONE`, `Rec:YES/No`, Wi-Fi และการอัป CSV (`Up:on/STOP Backlog:<แถวค้าง> OK:<ก้อนที่ส่งได้> Skip:<แถวที่ข้าม> Code:<HTTP ล่าสุด>`) |
+| `[STACK]` | ทุก 60 s | stack ที่เหลือน้อยสุด (byte) ของแต่ละ task — ต่ำกว่า ~500 ให้เพิ่ม `STACK_*` |
+| `[UPL]` | ตอนอัป CSV | `File …` เริ่มไฟล์, `POST <session>-<first>-<last> rows=… code=… ms`, `SKIP …`, `resend in …s` |
 | `[ERROR]` | มีปัญหา | SD mount/เขียนไม่ได้, I2S error, RTC not found, สร้างไฟล์ไม่ได้ ฯลฯ |
 
 ---
@@ -209,3 +213,51 @@ iot/firmware/
 | บอร์ดรีบูตเอง | ดู log ก่อนรีบูต: `task_wdt` = task ค้าง, `Brownout` = ไฟไม่พอ (ใช้สาย/พาวเวอร์แบงก์ที่จ่ายได้ ≥ 1 A) |
 | กด BOOT แล้วไม่เข้า Setup Mode | ต้องกด**หลัง**ปล่อย reset และตอนจอขึ้น `Hold BOOT button` ค้าง ~2 วินาที |
 | มือถือไม่เด้งหน้าตั้งค่า | ปิด mobile data ชั่วคราว แล้วเปิด `http://192.168.4.1` เอง |
+\n
+---
+
+## 7. อัป CSV ขึ้น cloud (issue #7)
+
+`uploadTask` ส่ง CSV บน SD ไปที่ ingest (`cloud/ingest/`, สเปค 20) ทีละก้อน ≤ 300 แถว เน็ตหลุดนานแค่ไหน พอกลับมาจะส่งย้อนหลังจากไฟล์เก่าสุดก่อนจนครบ แล้วตามไฟล์ที่กำลังเขียน
+
+**เปิดใช้ (ทีละขั้น):**
+
+1. `python cloud/ingest/make_token.py <device_id>` → ได้ 2 ค่า
+   - `token :` ยาว **43 ตัว** (A-Z a-z 0-9 `-` `_`) → `secrets.h`: `#define DEVICE_TOKEN "..."`
+   - `tfvars :` hash ยาว **64 ตัว** (0-9 a-f) → `cloud/infra/terraform.tfvars` แล้ว `terraform apply`
+   - **อย่าสลับ:** ใส่ hash ใน `secrets.h` = ได้ 401 ตลอด · เช็กว่าคู่กัน: `echo -n '<token>' | sha256sum` ต้องได้ hash ตัวเดียวกับใน tfvars
+2. Ingest URL = `terraform output relay_url` (`http://<relay-ip>:8080/ingest`) ตั้งในหน้า Setup หรือ `INGEST_URL` ใน `secrets.h` — **ค่าที่บันทึกในหน้า Setup (NVS) ทับค่าใน `secrets.h`** ถ้าเคยบันทึกไว้ต้องแก้ในหน้า Setup
+3. `Device ID` ของเครื่องต้องตรงกับที่ใช้สร้าง token
+4. flash แล้วดู Serial: `[CFG] INGEST='http://...' ... TOKEN=set` → `[UPL] POST <chunk> ... code=200`
+
+ว่าง Ingest URL หรือ `DEVICE_TOKEN` อย่างใดอย่างหนึ่ง = ไม่อัป
+
+**ส่งบ่อยแค่ไหน:** เขียน SD ทุก 1 วินาที แต่ส่งเป็นก้อน — ช่วงส่งย้อนหลัง ก้อนละ 300 แถวทุก ~10 วินาที · ตามทันแล้ว รอครบ 300 แถว (~5 นาทีที่ CSV=1000ms) หรือส่งเท่าที่มีเมื่อครบ `UPLOAD_PARTIAL_MS` → ~12–13 ไฟล์/ชั่วโมง/เครื่อง (~32 KB/ไฟล์) ข้อมูลบน S3 ช้ากว่าจริง ~5 นาที (realtime เป็นงาน #6)
+
+**ปลายทางบน S3:** `raw/csv/device_id=<id>/date=<YYYY-MM-DD>/hour=<HH>/part-<session>-<first>-<last>.csv` (วัน/ชั่วโมงตาม DateTime ในแถว เวลาไทย) ก้อนที่คร่อมชั่วโมงถูก ingest แยกเป็นไฟล์ชื่อเดียวกันในแต่ละชั่วโมง · pipeline (สเปค 30) รวมเป็น Parquet รายชั่วโมงทีหลัง
+
+**ไฟล์บน SD ที่ uploader สร้าง:**
+
+| ไฟล์ | ความหมาย |
+|---|---|
+| `<csv>.idx` | cursor `byte_offset,last_record_id` = ส่งถึงไหนแล้ว (เขียน `.idx.tmp` แล้ว rename) ขยับเมื่อได้ 200 เท่านั้น |
+| `/upload_skipped.csv` | ช่วงที่ไม่ได้ส่ง: `csv_path,start_byte,end_byte,lines,http_code,reason` (400/403, แถวเสีย, header ไม่ตรง) |
+
+**ผลตอบกลับ:** 200 = ขยับ cursor · 400/403 = ข้ามก้อน + จดลง `/upload_skipped.csv` · 413 = ลดก้อนครึ่งหนึ่ง · 429/5xx/timeout = รอ 5 → 60 s แล้วส่งก้อนเดิม · 401 หรือ 404 ฯลฯ = **หยุดอัปจนรีบูต** (`Up:STOP` ใน `[STAT]`) แก้ token/URL แล้วรีบูต
+
+**ส่งซ้ำเอง:** ลบ `<csv>.idx` ของไฟล์นั้น → เครื่องส่งทั้งไฟล์ใหม่ (ingest เขียนทับ key เดิม + pipeline ตัดแถวซ้ำด้วย Session/Record_ID)
+
+**ทำไมส่งเป็น HTTP ผ่าน relay (ตัดสินใจ 2026-11-17):** บอร์ดนี้ (ไม่มี PSRAM) เปิด HTTPS ไม่ได้ระหว่างอัด WAV — ทดสอบจริง: ก่อน POST heap ว่าง ~79 KB (ก้อนใหญ่สุด 41 KB) แต่ TLS handshake ใช้จนเหลือ < 1.3 KB แล้วยังขอเพิ่ม (`X509 - Allocation of memory failed`) ลด buffer ทีละไม่กี่ KB ไม่พอ จึงส่ง HTTP ธรรมดาไป EC2 relay (`cloud/relay/`) ที่ส่งต่อเป็น HTTPS ไป ingest เดิม — ข้อมูลและ token ช่วงบอร์ด → EC2 **ไม่เข้ารหัส** · โค้ดยังรองรับ `https://` สำหรับบอร์ดที่มี PSRAM
+
+**อื่น ๆ:** พัก 10 s หลังส่งสำเร็จแต่ละก้อน, ไม่จอง buffer 16 KB (อ่าน SD ทีละ ~1.4 KB ตรงเข้า HTTPClient) · กรณี `https://` ถ้าไม่ใส่ `INGEST_ROOT_CA` ใน `secrets.h` = เข้ารหัสแต่ไม่ตรวจ cert ของ server
+
+| อาการ | วิธีแก้ |
+|---|---|
+| `[UPL] CSV upload off` | ยังไม่ได้ใส่ `ingest_url` หรือ `DEVICE_TOKEN` |
+| `code=401` แล้ว `upload stopped` | token ผิด / hash ยังไม่อยู่ใน `device_token_hashes` ของ Terraform / ใส่ hash (64 ตัว) แทน token (43 ตัว) ใน `secrets.h` → แก้แล้ว flash (401 = หยุดจนรีบูต) |
+| `[CFG] INGEST=` ยังเป็นค่าเก่า | ค่าในหน้า Setup (NVS) ทับ `secrets.h` → แก้ในหน้า Setup แล้วรีบูต |
+| `code=403` ทุกก้อน | `Device ID` ของเครื่องไม่ตรงกับ token → แก้ในหน้า Setup ให้ตรง แล้วลบ `.idx` ของไฟล์ที่โดนข้าม |
+| `code=-1` / `SSL - Memory allocation failed` / `X509 - Allocation of memory failed` | ยังตั้ง URL เป็น `https://` → เปลี่ยนเป็น `relay_url` (`http://…:8080/ingest`) |
+| `code=-1 connection refused` กับ `http://` | EC2 relay ดับ (Learner Lab หมด session) หรือ IP ผิด → เปิด lab ใหม่, `curl http://<ip>:8080/health` |
+| `code=502` | relay ติดต่อ API Gateway ไม่ได้ → ดู `journalctl -u iot-dt-relay` บน EC2 |
+| `Backlog` ไม่ลดทั้งที่ `WiFi:UP` | ดู `[UPL] … resend in` (server ล่ม / Learner Lab หมด session) — ข้อมูลยังอยู่ใน SD ส่งต่อเองเมื่อกลับมา |

@@ -1,5 +1,7 @@
 #include "globals.h"
 
+#include "rtc_helper.h"
+
 #include <esp_task_wdt.h>
 
 
@@ -49,6 +51,12 @@ bool rtcAvailable = false;
 volatile bool     netConnected  = false;
 volatile int8_t   netRssi       = 0;
 volatile uint32_t netReconnects = 0;
+
+volatile uint32_t uploadBacklogRows = 0;
+volatile uint32_t uploadChunksOk    = 0;
+volatile uint32_t uploadRowsSkipped = 0;
+volatile int16_t  uploadLastCode    = 0;
+volatile bool     uploadStopped     = false;
 
 
 // =============================================================================

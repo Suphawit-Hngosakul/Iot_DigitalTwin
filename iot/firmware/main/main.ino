@@ -8,6 +8,7 @@
 #include "settings.h"
 #include "config_portal.h"
 #include "wifi_ntp.h"
+#include "csv_uploader.h"
 
 #include <Wire.h>
 #include <esp_heap_caps.h>
@@ -37,6 +38,8 @@ static const TaskSpec kTasks[] = {
 #if NET_ENABLED
   // Below mic/SD (prio 0): network is optional, SD is the source of truth
   { netTask,         "netTask",        STACK_NET,        0,    0 },
+  // CSV -> ingest (#7): lowest priority, one TLS connection at a time
+  { uploadTask,      "uploadTask",     STACK_UPLOAD,     0,    0 },
 #endif
 };
 
@@ -188,7 +191,7 @@ void loop() {
   LOG("STAT", "%s | Heap:%u MaxBlk:%u | SDFree:%luMB | SPL:%.1fdB (A %.1fdBA) | "
       "Lux:%.1flux | Temp:%.1fC | Humi:%.1f%% | "
       "GPS:%s(%.6f,%.6f) S:%d HDOP:%.1f | SD:%s | Rec:%s | "
-      "WiFi:%s RSSI:%d Reconn:%lu",
+      "WiFi:%s RSSI:%d Reconn:%lu | Up:%s Backlog:%lu OK:%lu Skip:%lu Code:%d",
       settings.deviceId, ESP.getFreeHeap(),
       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
       (unsigned long)sdFreeMB, currentSPL, currentSPLA,
@@ -197,7 +200,25 @@ void loop() {
       g.valid ? "FIX " : "NoFx", g.lat, g.lng, g.sats, g.hdop,
       sdAvailable ? "OK" : "NONE",
       isRecording ? "YES" : "No",
-      netConnected ? "UP" : "DOWN", (int)netRssi, (unsigned long)netReconnects);
+      netConnected ? "UP" : "DOWN", (int)netRssi, (unsigned long)netReconnects,
+      uploadStopped ? "STOP" : "on", (unsigned long)uploadBacklogRows,
+      (unsigned long)uploadChunksOk, (unsigned long)uploadRowsSkipped, (int)uploadLastCode);
+
+  // Stack left per task (bytes, lowest so far) every 60 s: tune STACK_* in
+  // config.h with it. Looked up by name: micTask deletes itself on I2S failure.
+  static uint8_t stackTick = 0;
+  if (++stackTick >= 6) {
+    stackTick = 0;
+    char buf[200] = "";
+    size_t n = 0;
+    for (const TaskSpec &t : kTasks) {
+      TaskHandle_t h = xTaskGetHandle(t.name);
+      if (h && n < sizeof(buf))
+        n += snprintf(buf + n, sizeof(buf) - n, "%s:%u ", t.name,
+                      (unsigned)uxTaskGetStackHighWaterMark(h));
+    }
+    LOG("STACK", "%s", buf);
+  }
 
   delay(10000);
 }
