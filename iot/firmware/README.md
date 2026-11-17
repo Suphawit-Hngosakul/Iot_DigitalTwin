@@ -99,6 +99,14 @@ iot/firmware/
 | Stack | `STACK_MIC`, `STACK_SD_PROCESS`, `STACK_GPS`, `STACK_LUX`, `STACK_DHT`, `STACK_OLED` | 20000, 20000, 4096 ×3, 8192 |
 | Setup Mode | `CONFIG_AP_SSID` / `CONFIG_AP_PASS` / `CONFIG_PORTAL_TIMEOUT_MS` / `CONFIG_BUTTON_PIN` | IoT-Walking-Setup / walking123 / 5 นาที / GPIO0 |
 
+### 2.3 เวลาบน SD (`DateTime`)
+
+- คอลัมน์ `DateTime` ใน CSV และชื่อโฟลเดอร์/ไฟล์บน SD เป็น**เวลาไทย (UTC+7)** รูปแบบ `YYYY-MM-DD HH:MM:SS` **ไม่มี offset** ทุกเครื่องต้องเหมือนกัน เพราะ cloud แบ่งข้อมูลรายชั่วโมงจากค่านี้ และแปลงเป็น UTC เอง (`ts_utc = ts_local − 7 ชม.`)
+- แหล่งตั้งเวลา RTC ทุกทางให้ผลเป็นเวลาไทย: NTP ตอนบูต (`configTime(NTP_GMT_OFFSET, …)`), หน้า Setup จากเวลาในมือถือ, หรือ GPS (UTC + `NTP_GMT_OFFSET`) ห้ามเปลี่ยน `NTP_GMT_OFFSET` เป็นค่าอื่น
+- ไม่มี RTC → `DateTime` เป็นเลขวินาทีตั้งแต่บูต, `Time_Valid=0`
+- มี RTC แต่ไฟเคยดับและยังไม่ได้ตั้งเวลา (หรือปี < `TIME_MIN_YEAR`) → `Time_Valid=0` + flag `TIME_INVALID`
+- ทั้งสองกรณี cloud จะนับเป็น `NO_RTC` และไม่เอาแถวไปใช้ (ดู `docs/data-schema.md`)
+
 ---
 
 ## 3. คาลิเบต
