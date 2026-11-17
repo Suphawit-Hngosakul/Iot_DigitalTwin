@@ -15,6 +15,7 @@ IaC ของทุกอย่างใน `cloud/` ด้วย **Terraform/Op
 | `relay` | 10 | #7 | EC2 t3.micro + Elastic IP + SG port 8080: รับ HTTP จากบอร์ด ส่งต่อ HTTPS ไป ingest (`cloud/relay/`) ปิดได้ด้วย `relay_enabled = false` |
 | `pipeline` | 30 | #11–#16 | Lambda 6 ตัว `iot-dt-iot-*` + Step Functions `iot-dt-iot-pipeline` + Scheduler ทุกชั่วโมงนาทีที่ 5 (เวลาไทย) + SNS `iot-dt-iot-pipeline-alerts` (`cloud/pipeline/`) |
 | `catalog` | 40 | #17 | Glue database `iot_walking` + ตาราง `raw_csv`, `raw_csv_unknown`, `readings_1s`, `readings_1min`, `quality` (partition projection) + Athena workgroup `iot_walking` + saved queries + lifecycle `athena-results/` 7 วัน (ใน `storage`) |
+| `api` | 40 | #18 | Lambda `iot-dt-api` (Py3.12, LabRole) + HTTP API แยก `iot-dt-api`: `GET /devices /latest /readings /quality` + CORS (`api_allowed_origins`) + log 14 วัน (`cloud/api/`) |
 
 ```bash
 aws s3 mb s3://iot-dt-<account-id> --region us-east-1   # สร้าง bucket เองก่อน (ดูด้านล่าง)
@@ -44,7 +45,12 @@ Learner Lab: credentials เปลี่ยนทุก session ต้องอ�
 - ทุก query ควรมี `WHERE device_id = ... AND date = ...` ถ้าสแกนเกิน `athena_bytes_scanned_cutoff` (default 1 GiB) Athena จะยกเลิก
 - query ที่ไม่มีเงื่อนไข `date` ทำให้ Athena list S3 ทุก partition ที่ projection สร้าง (เครื่อง × วัน × 24 ชม. สำหรับ `raw_csv`) จะช้ามากแม้ข้อมูลน้อย จึงตั้ง `catalog_date_start` ใกล้วันที่มีข้อมูลจริง (default 2026-11-01) และควรใส่ `date` ทุกครั้ง
 
-ทดสอบหลัง apply (CloudShell):
+**api:**
+- URL ดูจาก `terraform output api_url` ส่วนวิธีเรียก/ทดสอบดู `cloud/api/README.md`
+- CORS default `["*"]` เมื่อเว็บ (#35) มีโดเมนแล้วให้ใส่ `api_allowed_origins` ใน `terraform.tfvars`
+- Lambda เรียก Athena / Glue / S3 ด้วย `LabRole` ถ้าได้ 502 ให้ดู log `/aws/lambda/iot-dt-api`
+
+ทดสอบ catalog หลัง apply (CloudShell):
 
 ```bash
 QID=$(aws athena start-query-execution --work-group iot_walking \
