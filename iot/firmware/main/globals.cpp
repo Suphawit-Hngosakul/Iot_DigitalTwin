@@ -46,6 +46,10 @@ volatile uint32_t audioDropCount   = 0;
 
 bool rtcAvailable = false;
 
+volatile bool     netConnected  = false;
+volatile int8_t   netRssi       = 0;
+volatile uint32_t netReconnects = 0;
+
 
 // =============================================================================
 //  Audio Pool

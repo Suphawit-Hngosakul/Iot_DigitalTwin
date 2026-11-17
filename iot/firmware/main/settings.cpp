@@ -25,6 +25,9 @@ static const char *K_CSV     = "csvMs";
 static const char *K_SDMIN   = "sdMinMb";
 static const char *K_DEVID   = "devId";
 static const char *K_DEVTYPE = "devType";
+static const char *K_INGEST  = "ingestUrl";
+static const char *K_PRESIGN = "presignUrl";
+static const char *K_WSS     = "wssUrl";
 
 // Kept apart from NVS_NAMESPACE so settingsReset() does not clear it.
 static const char *NVS_SYS_NAMESPACE = "iotwalk_sys";
@@ -45,6 +48,19 @@ bool deviceIdValid(const char *id) {
     if (!isalnum((unsigned char)c) && c != '-' && c != '_') return false;
   }
   return true;
+}
+
+bool settingsUrlValid(const char *url, bool websocket) {
+  size_t n = strlen(url);
+  if (n == 0) return true;                 // not set = feature off
+  if (n >= SETTINGS_URL_LEN) return false;
+  for (size_t i = 0; i < n; i++) {
+    unsigned char c = url[i];
+    if (c <= ' ' || c == '"' || c == '\'' || c == '<' || c == '>' || c >= 0x7f) return false;
+  }
+  if (websocket)
+    return !strncmp(url, "wss://", 6) || !strncmp(url, "ws://", 5);
+  return !strncmp(url, "https://", 8) || !strncmp(url, "http://", 7);
 }
 
 const char *deviceTypeName(uint8_t type) {
@@ -80,6 +96,10 @@ void settingsDefaults(RuntimeSettings &out) {
   out.recordTimeSec  = RECORD_TIME;
   out.csvIntervalMs  = CSV_INTERVAL_MS;
   out.sdMinFreeMb    = SD_MIN_FREE_MB;
+
+  copyStr(out.ingestUrl,  sizeof(out.ingestUrl),  INGEST_URL);
+  copyStr(out.presignUrl, sizeof(out.presignUrl), PRESIGN_URL);
+  copyStr(out.wssUrl,     sizeof(out.wssUrl),     WSS_URL);
 }
 
 
@@ -126,6 +146,10 @@ void settingsLoad() {
   settings.csvIntervalMs  = p.getUInt(K_CSV,   settings.csvIntervalMs);
   settings.sdMinFreeMb    = p.getUInt(K_SDMIN, settings.sdMinFreeMb);
 
+  loadStr(p, K_INGEST,  settings.ingestUrl,  sizeof(settings.ingestUrl));
+  loadStr(p, K_PRESIGN, settings.presignUrl, sizeof(settings.presignUrl));
+  loadStr(p, K_WSS,     settings.wssUrl,     sizeof(settings.wssUrl));
+
   p.end();
 
   // NVS values are trusted only within the same ranges the Setup page allows
@@ -146,6 +170,17 @@ void settingsLoad() {
   keepInRange<uint32_t>(settings.recordTimeSec,  5,       3600,    def.recordTimeSec,  K_REC);
   keepInRange<uint32_t>(settings.csvIntervalMs,  100,     60000,   def.csvIntervalMs,  K_CSV);
   keepInRange<uint32_t>(settings.sdMinFreeMb,    0,       100000,  def.sdMinFreeMb,    K_SDMIN);
+
+  struct { char *v; const char *d; bool ws; const char *key; } urls[] = {
+    { settings.ingestUrl,  def.ingestUrl,  false, K_INGEST  },
+    { settings.presignUrl, def.presignUrl, false, K_PRESIGN },
+    { settings.wssUrl,     def.wssUrl,     true,  K_WSS     },
+  };
+  for (auto &u : urls) {
+    if (settingsUrlValid(u.v, u.ws)) continue;
+    LOG("WARN", "NVS '%s' invalid - using default", u.key);
+    copyStr(u.v, SETTINGS_URL_LEN, u.d);
+  }
 
   LOG("CFG", "Settings loaded from NVS");
 }
@@ -177,6 +212,10 @@ bool settingsSave(const RuntimeSettings &in) {
   ok &= p.putUInt(K_CSV,   in.csvIntervalMs) > 0;
   ok &= p.putUInt(K_SDMIN, in.sdMinFreeMb)   > 0;
 
+  ok &= p.putString(K_INGEST,  in.ingestUrl)  == strlen(in.ingestUrl);
+  ok &= p.putString(K_PRESIGN, in.presignUrl) == strlen(in.presignUrl);
+  ok &= p.putString(K_WSS,     in.wssUrl)     == strlen(in.wssUrl);
+
   p.end();
 
   settings = in;
@@ -206,6 +245,9 @@ void settingsPrint() {
   LOG("CFG", "RECORD=%lus  CSV=%lums  SD_MIN_FREE=%luMB",
       (unsigned long)settings.recordTimeSec, (unsigned long)settings.csvIntervalMs,
       (unsigned long)settings.sdMinFreeMb);
+  LOG("CFG", "INGEST='%s' PRESIGN='%s' WSS='%s' TOKEN=%s",
+      settings.ingestUrl, settings.presignUrl, settings.wssUrl,
+      DEVICE_TOKEN[0] ? "set" : "MISSING");   // never print the token itself
 }
 
 
