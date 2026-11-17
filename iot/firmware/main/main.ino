@@ -58,10 +58,9 @@ static void createQueuesAndMutexes() {
   luxMutex  = xSemaphoreCreateMutex();
   dhtMutex  = xSemaphoreCreateMutex();
   wireMutex = xSemaphoreCreateMutex();
-  tlsMutex  = xSemaphoreCreateMutex();
 
   if (!freeQueue || !readyQueue ||
-      !sdMutex || !gpsMutex || !luxMutex || !dhtMutex || !wireMutex || !tlsMutex) {
+      !sdMutex || !gpsMutex || !luxMutex || !dhtMutex || !wireMutex) {
     LOG("ERROR", "Failed to create Queue/Mutex! Restarting in 3s...");
     delay(3000);
     ESP.restart();
@@ -157,11 +156,6 @@ void setup() {
   else
     oledShowStatus("GPS", "No data from GPS!", "Check TX->GPIO16");
   delay(1000);
-
-  // ── TLS memory reserve: take it before SD / tasks fragment the heap ──────
-#if NET_ENABLED
-  tlsReserveInit();
-#endif
 
   // ── SD Card + CSV ────────────────────────────────────────────────────────
   initSD();

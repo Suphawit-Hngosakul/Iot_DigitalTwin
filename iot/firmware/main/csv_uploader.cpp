@@ -424,19 +424,6 @@ private:
   bool        sdFailed_ = false;
 };
 
-// First failed malloc during a POST (mbedTLS asks for one block at a time:
-// size + free heap at that moment shows "too little heap" vs "too fragmented").
-static volatile uint32_t failSize = 0, failFree = 0, failBlk = 0, failCount = 0;
-
-static void onAllocFailed(size_t size, uint32_t caps, const char *fn) {
-  (void)caps; (void)fn;
-  if (failCount++ == 0) {
-    failSize = size;
-    failFree = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-    failBlk  = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-  }
-}
-
 // One POST. Returns the HTTP status, a negative HTTPClient error, or
 // CODE_BAD_URL.
 static int postChunk(const char *path, const Chunk &c) {
@@ -470,9 +457,6 @@ static int postChunk(const char *path, const Chunk &c) {
   http.addHeader("Content-Type", "text/csv");
 
   ChunkStream body(path, c.start, c.end);
-  uint32_t heap0 = ESP.getFreeHeap();
-  uint32_t blk0  = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-  failCount = 0;
   uint32_t t0   = millis();
   int      code = http.sendRequest("POST", &body, body.total());
   uint32_t ms   = millis() - t0;
@@ -499,11 +483,6 @@ static int postChunk(const char *path, const Chunk &c) {
       body.sdFailed() ? " | SD read failed" : "");
   if (reply[0]) LOG("UPL", "reply: %s", reply);
   if (tlsErr[0]) LOG("UPL", "TLS error: %s", tlsErr);
-  if (code < 0)
-    LOG("UPL", "heap before POST %lu maxBlk %lu | first failed malloc %lu B "
-        "(free %lu maxBlk %lu, %lu fails)",
-        (unsigned long)heap0, (unsigned long)blk0, (unsigned long)failSize,
-        (unsigned long)failFree, (unsigned long)failBlk, (unsigned long)failCount);
   return code;
 }
 
@@ -537,8 +516,6 @@ void uploadTask(void *pv) {
   uint32_t rowBytes    = DEFAULT_ROW_BYTES;
   uint32_t lastOkMs    = millis();
   bool     offLogged   = false;
-
-  heap_caps_register_failed_alloc_callback(onAllocFailed);
 
   for (;;) {
     if (uploadStopped) { sleepMs(60000); continue; }
@@ -626,21 +603,8 @@ void uploadTask(void *pv) {
       havePending = true;
     }
 
-    // ── POST, one TLS connection at a time ────────────────────────────────
-    int code;
-    {
-      tlsWanted = true;                         // realtime task: drop WSS
-      MutexLock tlsLock(tlsMutex, UPLOAD_TLS_WAIT_MS);
-      tlsWanted = false;
-      if (!tlsLock) {
-        LOG("UPL", "TLS busy for %lums - retry", (unsigned long)UPLOAD_TLS_WAIT_MS);
-        sleepMs(UPLOAD_POLL_MS);
-        continue;
-      }
-      tlsReserveRelease();                      // big contiguous block for mbedTLS
-      code = postChunk(t.path, pending);
-      tlsReserveRetake();
-    }
+    // ── POST ─────────────────────────────────────────────────────────────
+    int code = postChunk(t.path, pending);
     uploadLastCode = code;
 
     if (code == 200) {

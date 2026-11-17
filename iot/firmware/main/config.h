@@ -131,11 +131,8 @@
 #define UPLOAD_BACKOFF_MIN_MS  5000    // 429 / 5xx / timeout: doubles up to NET_BACKOFF_MAX_MS
 #define UPLOAD_CHUNK_GAP_MS    10000   // pause after each 200 so realtime (#6) can reconnect
 #define UPLOAD_PARTIAL_MS      300000  // file being written: send < full chunk after this long
-#define UPLOAD_POLL_MS         5000    // wait when WiFi / SD / TLS is not ready
+#define UPLOAD_POLL_MS         5000    // wait when WiFi / SD is not ready
 #define UPLOAD_ACTIVE_POLL_MS  30000   // wait for new rows when everything is sent
-#define UPLOAD_TLS_WAIT_MS     20000   // max wait for tlsMutex before trying again
-#define SD_MAX_OPEN_FILES      4       // FatFS keeps ~4.6 KB per slot from mount (default 5)
-#define TLS_RESERVE_BYTES      40960   // heap kept in one piece for TLS (see globals.h), 0 = off
 
 // =============================================================================
 //  Audio Recording (SD WAV)

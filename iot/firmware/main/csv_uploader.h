@@ -16,8 +16,8 @@
 //    one Session per chunk), X-Chunk-Id "<session>-<first>-<last>".
 //    A retry resends exactly the same bytes (same chunk_id -> same S3 key).
 //  - SD is read in small pieces; sdMutex is never held during network I/O.
-//  - One TLS connection at a time (spike #4): takes tlsMutex for each POST
-//    and sets tlsWanted so a realtime task (#6) drops its WSS first.
+//  - This board (no PSRAM) has no RAM for TLS while recording, so
+//    ingestUrl is plain http:// to the EC2 relay (cloud/relay).
 //
 //  Ingest status (spec 20 §2):
 //    200            -> advance cursor

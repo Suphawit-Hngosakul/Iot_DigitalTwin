@@ -1,9 +1,7 @@
 #include "globals.h"
 
 #include "rtc_helper.h"
-#include "settings.h"
 
-#include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 
 
@@ -16,36 +14,6 @@ SemaphoreHandle_t dhtMutex;
 SemaphoreHandle_t gpsMutex;
 SemaphoreHandle_t sdMutex;
 SemaphoreHandle_t wireMutex;
-SemaphoreHandle_t tlsMutex;
-volatile bool     tlsWanted = false;
-
-static void *tlsReserve   = NULL;
-static bool  tlsReserveOn = false;   // only for an https:// ingest URL
-
-void tlsReserveInit() {
-#if TLS_RESERVE_BYTES > 0
-  // Plain http:// (EC2 relay) needs no TLS: keep the heap for everything else.
-  if (strncmp(settings.ingestUrl, "https://", 8) != 0) return;
-  tlsReserveOn = true;
-  tlsReserve = malloc(TLS_RESERVE_BYTES);
-  LOG("INFO", "TLS reserve %u B %s | heap %u maxBlk %u", (unsigned)TLS_RESERVE_BYTES,
-      tlsReserve ? "OK" : "FAILED", ESP.getFreeHeap(),
-      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-#endif
-}
-
-void tlsReserveRelease() {
-  if (tlsReserve) { free(tlsReserve); tlsReserve = NULL; }
-}
-
-void tlsReserveRetake() {
-#if TLS_RESERVE_BYTES > 0
-  if (!tlsReserveOn) return;
-  if (!tlsReserve) tlsReserve = malloc(TLS_RESERVE_BYTES);
-  if (!tlsReserve) LOG("WARN", "TLS reserve not retaken (maxBlk %u)",
-                       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-#endif
-}
 
 
 // =============================================================================

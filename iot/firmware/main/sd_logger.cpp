@@ -50,8 +50,7 @@ static unsigned long lastRemountAttemptMs = 0;
 // =============================================================================
 
 static bool sdBegin() {
-  return SD_MMC.begin("/sdcard", true /* 1-bit */, false, 4000 /* kHz */,
-                      SD_MAX_OPEN_FILES);
+  return SD_MMC.begin("/sdcard", true /* 1-bit */, false, 4000 /* kHz */);
 }
 
 // Caller must hold sdMutex.

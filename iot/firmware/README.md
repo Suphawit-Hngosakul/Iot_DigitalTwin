@@ -233,9 +233,9 @@ iot/firmware/
 
 **ส่งซ้ำเอง:** ลบ `<csv>.idx` ของไฟล์นั้น → เครื่องส่งทั้งไฟล์ใหม่ (ingest เขียนทับ key เดิม + pipeline ตัดแถวซ้ำด้วย Session/Record_ID)
 
-**ทำไมส่งเป็น HTTP ผ่าน relay (ตัดสินใจ 2026-11-17):** บอร์ดนี้ (ไม่มี PSRAM) เปิด HTTPS ไม่ได้ระหว่างอัด WAV — ทดสอบจริง: ก่อน POST heap ว่าง ~79 KB (ก้อนใหญ่สุด 41 KB) แต่ TLS handshake ใช้จนเหลือ < 1.3 KB แล้วยังขอเพิ่ม (`X509 - Allocation of memory failed`) ลด buffer ทีละไม่กี่ KB ไม่พอ จึงส่ง HTTP ธรรมดาไป EC2 relay (`cloud/relay/`) ที่ส่งต่อเป็น HTTPS ไป ingest เดิม — ข้อมูลและ token ช่วงบอร์ด → EC2 **ไม่เข้ารหัส** · ถ้า URL เป็น `https://` (บอร์ดที่มี PSRAM) จะจอง `TLS_RESERVE_BYTES` (40 KB) ตั้งแต่บูตแล้วคืนให้ตอน POST เหมือนเดิม ถ้าเป็น `http://` ไม่จอง
+**ทำไมส่งเป็น HTTP ผ่าน relay (ตัดสินใจ 2026-11-17):** บอร์ดนี้ (ไม่มี PSRAM) เปิด HTTPS ไม่ได้ระหว่างอัด WAV — ทดสอบจริง: ก่อน POST heap ว่าง ~79 KB (ก้อนใหญ่สุด 41 KB) แต่ TLS handshake ใช้จนเหลือ < 1.3 KB แล้วยังขอเพิ่ม (`X509 - Allocation of memory failed`) ลด buffer ทีละไม่กี่ KB ไม่พอ จึงส่ง HTTP ธรรมดาไป EC2 relay (`cloud/relay/`) ที่ส่งต่อเป็น HTTPS ไป ingest เดิม — ข้อมูลและ token ช่วงบอร์ด → EC2 **ไม่เข้ารหัส** · โค้ดยังรองรับ `https://` สำหรับบอร์ดที่มี PSRAM
 
-**ข้อจำกัด (spike #4):** บอร์ดเปิด TLS ได้ทีละ 1 การเชื่อมต่อ → uploader ถือ `tlsMutex` ตอน POST (~5–9 s/ก้อน) แล้วพัก 10 s ให้ realtime (#6) ต่อกลับ, ไม่จอง buffer 16 KB (อ่าน SD ทีละ ~1.4 KB ตรงเข้า HTTPClient) · ไม่ใส่ `INGEST_ROOT_CA` ใน `secrets.h` = เข้ารหัสแต่ไม่ตรวจ cert ของ server
+**อื่น ๆ:** พัก 10 s หลังส่งสำเร็จแต่ละก้อน, ไม่จอง buffer 16 KB (อ่าน SD ทีละ ~1.4 KB ตรงเข้า HTTPClient) · กรณี `https://` ถ้าไม่ใส่ `INGEST_ROOT_CA` ใน `secrets.h` = เข้ารหัสแต่ไม่ตรวจ cert ของ server
 
 | อาการ | วิธีแก้ |
 |---|---|
