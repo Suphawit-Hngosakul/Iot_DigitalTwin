@@ -1,0 +1,4 @@
+# สำหรับรันเทสต์ในเครื่องเท่านั้น (Lambda ใช้ boto3 ที่มากับ runtime)
+boto3
+moto[s3]>=5
+pytest
