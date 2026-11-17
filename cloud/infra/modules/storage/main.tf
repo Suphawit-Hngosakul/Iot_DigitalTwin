@@ -1,5 +1,5 @@
-# S3 data lake (spec 01 §2). Lifecycle for raw/audio/ and athena-results/
-# is added with the issues that create those prefixes.
+# S3 data lake (spec 01 §2). Lifecycle rules for each prefix are added with
+# the issue that creates the prefix (athena-results/ = #17, raw/audio/ = #20).
 variable "bucket_name" {
   type = string
 }
@@ -34,6 +34,27 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "data" {
   rule {
     apply_server_side_encryption_by_default {
       sse_algorithm = "AES256"
+    }
+  }
+}
+
+# One lifecycle configuration per bucket: it REPLACES every rule on the bucket,
+# so add new prefixes (e.g. raw/audio/ for #20) as extra rules here.
+resource "aws_s3_bucket_lifecycle_configuration" "data" {
+  bucket = local.bucket_name
+
+  # Athena query results (spec 40 §2, #17): keep 7 days.
+  rule {
+    id     = "athena-results-7d"
+    status = "Enabled"
+    filter {
+      prefix = "athena-results/"
+    }
+    expiration {
+      days = 7
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
     }
   }
 }

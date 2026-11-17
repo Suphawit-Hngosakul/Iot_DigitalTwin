@@ -18,3 +18,7 @@ pipeline_schedule_enabled = true                # false = รันมืออ�
 # layer สำเร็จรูปของ AWS (มี pyarrow) เลขเวอร์ชันล่าสุดดูที่
 # https://aws-sdk-pandas.readthedocs.io/en/stable/install.html หัวข้อ AWS Lambda Layer
 pandas_layer_arn = "arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:<version>"
+
+# Glue + Athena (#17) ไม่ต้องใส่ก็ได้ ใช้ค่า default
+# catalog_date_start          = "2025-01-01"   # วันแรกที่ตารางมองเห็น (เวลาไทย)
+# athena_bytes_scanned_cutoff = 1073741824     # query สแกนเกิน 1 GiB ถูกยกเลิก
