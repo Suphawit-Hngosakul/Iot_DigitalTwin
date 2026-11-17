@@ -137,3 +137,32 @@ python -m pytest -q
 | `test_already_processed`, `test_resend_same_chunk_is_still_processed` | ALREADY_PROCESSED (ส่งก้อนเดิมซ้ำไม่ทำให้รันใหม่) |
 | `test_backfill_chunk_makes_changed`, `test_replaced_content_makes_changed`, `test_force_on_published_is_changed` | CHANGED |
 | `test_hash_ignores_order_and_size` | hash ไม่ขึ้นกับลำดับ |
+
+## test_pipeline_steps.py (#13–#16, ต้องมี pyarrow)
+
+ใช้ moto จำลอง S3 วาง CSV ใน `raw/csv/...` แล้วเรียก handler ตามลำดับเดียวกับ state machine
+
+| test | ตรวจอะไร |
+|---|---|
+| `test_good_batch_passes_and_writes_report` | ข้อมูลดี → PASS และเขียน `validation/<batch_id>/report.json` |
+| `test_bad_header_fails` | header ผิด → FAIL `BAD_HEADER` |
+| `test_duplicates_counted_not_failed` | แถวซ้ำ (ส่งก้อนเดิมสองครั้ง) นับเป็น duplicate ไม่ทำให้ FAIL และไม่นับในสัดส่วน invalid |
+| `test_missing_record_ids` | Record_ID ขาดช่วง → missing_rows, missing_ranges, loss_rate ถูก |
+| `test_too_many_invalid_fails` | แถวเสีย > 20% → FAIL `TOO_MANY_INVALID` |
+| `test_device_id_not_matching_path_fails` | Device_ID ในแถวไม่ตรง path → `DEVICE_ID_MISMATCH` |
+| `test_unknown_device_fails` / `test_device_type_mismatch_fails` | ไม่มีใน devices.csv / Device_Type ไม่ตรงทะเบียน |
+| `test_station_outside_registry_fails` | station มีแถวนอกช่วง valid_from–valid_to → `UNKNOWN_STATION_SITE` |
+| `test_time_jump_flagged_not_dropped` | เวลากระโดด → flag `TIME_JUMP` แต่ยังเก็บแถว |
+| `test_parse_error_row_is_invalid` | แถวแปลงไม่ได้ → invalid (ไม่ทำให้ Lambda พัง) |
+| `test_quarantine_copies_files_and_reason` | คัดลอก raw ไป `quarantine/<batch_id>/` + `reason.json` โดย raw เดิมยังอยู่ |
+| `test_transform_tables` | readings_1s / readings_1min (mean/max/min ไม่มี Leq, cell_id null) / quality ถูกต้อง |
+| `test_one_parquet_per_table_per_hour` | raw หลาย part ในชั่วโมงเดียว → Parquet 1 ไฟล์ต่อตาราง |
+| `test_speed_filter_nulls_jump` | จุด GPS ที่เร็วเกิน 30 km/h จากจุดก่อน → lat/lon เป็น null |
+| `test_station_uses_registry_position` | Stationary ใช้พิกัดจาก devices.csv |
+| `test_verify_publishes_then_check_says_already_processed` | Verify เขียน manifest แล้ว CheckBatch รอบถัดไปได้ ALREADY_PROCESSED, มี part ใหม่ → CHANGED |
+| `test_verify_mismatch_raises` | จำนวนแถวไม่ตรง → `VerifyMismatch` |
+| `test_count_data_lines_matches_parser` | ตัวนับบรรทัดของ Verify ตรงกับ parser (บรรทัดว่าง/BOM) |
+
+## test_statemachine.py (#11)
+
+แทนค่า `${...}` ใน `statemachine/pipeline.asl.json` แบบเดียวกับ Terraform แล้วตรวจโครง: ทุก state ไปถึงได้, ทุก `Next` มีจริง, ทุกเส้นทางใน Map จบที่ Published / Quarantined / StopAlreadyProcessed / NoData / InvalidInput / PipelineFailed และทุก Task มี Retry + Catch

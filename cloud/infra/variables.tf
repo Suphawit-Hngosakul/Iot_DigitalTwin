@@ -31,3 +31,20 @@ variable "relay_ssh_cidrs" {
   type        = list(string)
   default     = []
 }
+
+variable "alert_email" {
+  description = "Email for pipeline failure alerts (SNS). Confirm the subscription mail once. Empty = no email."
+  type        = string
+  default     = ""
+}
+
+variable "pipeline_schedule_enabled" {
+  description = "Run the IoT pipeline every hour at minute 5. false = manual runs only."
+  type        = bool
+  default     = true
+}
+
+variable "pandas_layer_arn" {
+  description = "AWS SDK for pandas Lambda layer for Python 3.12 in us-east-1 (see aws-sdk-pandas install docs, 'AWS Lambda Layer')."
+  type        = string
+}

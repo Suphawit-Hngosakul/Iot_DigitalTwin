@@ -43,3 +43,17 @@ module "relay" {
   source_dir   = "${path.root}/../relay"
   ssh_cidrs    = var.relay_ssh_cidrs
 }
+
+# IoT hourly pipeline (spec 30, #11-#16).
+module "pipeline" {
+  source            = "./modules/pipeline"
+  name_prefix       = var.name_prefix
+  role_arn          = data.aws_iam_role.lab.arn
+  bucket_name       = module.storage.bucket_name
+  functions_dir     = "${path.root}/../pipeline/functions"
+  common_dir        = "${path.root}/../pipeline/common"
+  statemachine_file = "${path.root}/../pipeline/statemachine/pipeline.asl.json"
+  alert_email       = var.alert_email
+  schedule_enabled  = var.pipeline_schedule_enabled
+  pandas_layer_arn  = var.pandas_layer_arn
+}
