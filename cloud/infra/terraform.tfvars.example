@@ -6,3 +6,7 @@ device_token_hashes = {
   "<sha256-of-token-walk-01>" = "IOTW-A001"
   "<sha256-of-token-walk-02>" = "IOTW-A002"
 }
+
+# (Optional) ตั้งค่า GEE เพิ่มเติมถ้าต้องการ override ค่าเริ่มต้น
+# gee_project = "turnkey-tribute-511903-t6"
+# gee_assets  = "projects/turnkey-tribute-511903-t6/assets/laksi_boundary"
