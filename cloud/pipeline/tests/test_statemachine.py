@@ -14,6 +14,8 @@ def render():
                      "alert_topic_arn"}
     for n in names:
         text = text.replace("${%s}" % n, f"arn:aws:lambda:us-east-1:123:function:{n}")
+    # templatefile() reads every "${" or "%{" as a template expression, so none may be left
+    assert "${" not in text and "%{" not in text
     return json.loads(text)
 
 

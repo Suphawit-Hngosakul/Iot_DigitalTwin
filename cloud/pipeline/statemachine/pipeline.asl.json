@@ -1,5 +1,5 @@
 {
-  "Comment": "IoT hourly pipeline (spec 30 §3, D21). Terraform fills ${...} with templatefile().",
+  "Comment": "IoT hourly pipeline (spec 30 §3, D21). Terraform fills the ARN placeholders with templatefile().",
   "StartAt": "PlanBatches",
   "States": {
     "PlanBatches": {
