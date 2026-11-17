@@ -57,3 +57,12 @@ module "pipeline" {
   schedule_enabled  = var.pipeline_schedule_enabled
   pandas_layer_arn  = var.pandas_layer_arn
 }
+
+# Glue Data Catalog + Athena (spec 40 §2, #17). Partition projection -> no crawler.
+module "catalog" {
+  source               = "./modules/catalog"
+  bucket_name          = module.storage.bucket_name
+  devices_csv          = "${path.root}/../pipeline/common/devices.csv"
+  date_start           = var.catalog_date_start
+  bytes_scanned_cutoff = var.athena_bytes_scanned_cutoff
+}

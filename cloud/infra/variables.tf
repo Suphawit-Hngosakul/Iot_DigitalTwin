@@ -48,3 +48,15 @@ variable "pandas_layer_arn" {
   description = "AWS SDK for pandas Lambda layer for Python 3.12 in us-east-1 (see aws-sdk-pandas install docs, 'AWS Lambda Layer')."
   type        = string
 }
+
+variable "catalog_date_start" {
+  description = "First Thai-local date the Glue tables can see (partition projection, yyyy-MM-dd). Keep it close to the first real data: a query without a date filter lists every projected partition in S3 (devices x days x 24 for raw_csv), so an early start makes it very slow."
+  type        = string
+  default     = "2026-11-01"
+}
+
+variable "athena_bytes_scanned_cutoff" {
+  description = "Athena cancels a query that scans more than this (bytes, min 10 MB). Protects the lab budget from queries without a partition filter."
+  type        = number
+  default     = 1073741824 # 1 GiB
+}
