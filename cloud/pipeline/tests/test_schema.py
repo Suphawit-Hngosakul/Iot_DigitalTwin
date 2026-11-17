@@ -7,7 +7,7 @@ import pytest
 from common import schema as s
 
 FIXTURES = Path(__file__).with_name("fixtures")
-FIRMWARE_SD_LOGGER = Path(__file__).resolve().parents[3] / "iot/firmware/main/sd_logger.cpp"
+FIRMWARE_SD_LOGGER = Path(__file__).resolve().parents[3] / "iot/firmware/main/sd_logger.h"
 
 
 def read_fixture(name):
@@ -33,8 +33,9 @@ def test_header_matches_firmware_source():
     if not FIRMWARE_SD_LOGGER.exists():
         pytest.skip("firmware not in this checkout")
     src = FIRMWARE_SD_LOGGER.read_text()
-    start = src.index('csvFile.println("Device_ID')
-    end = src.index(");", start)
+    # #define CSV_HEADER "Device_ID,..." \  (string literals joined over lines)
+    start = src.index("#define CSV_HEADER")
+    end = src.index("\n\n", start)
     header = "".join(part for part in src[start:end].split('"')[1::2])
     assert tuple(header.split(",")) == s.CSV_COLUMNS
 
