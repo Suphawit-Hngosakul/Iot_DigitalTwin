@@ -31,3 +31,15 @@ variable "relay_ssh_cidrs" {
   type        = list(string)
   default     = []
 }
+
+variable "gee_project" {
+  description = "Google Earth Engine / Google Cloud Project ID"
+  type        = string
+  default     = "turnkey-tribute-511903-t6"
+}
+
+variable "gee_assets" {
+  description = "Asset path to verify in GEE"
+  type        = string
+  default     = "projects/turnkey-tribute-511903-t6/assets/laksi_boundary"
+}
