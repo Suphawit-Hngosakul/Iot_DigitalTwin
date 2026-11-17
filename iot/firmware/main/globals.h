@@ -84,6 +84,23 @@ extern SemaphoreHandle_t gpsMutex;
 extern SemaphoreHandle_t sdMutex;
 extern SemaphoreHandle_t wireMutex;   // I2C bus: RTC + OLED + BH1750
 
+// One TLS connection at a time (spike #4: no PSRAM, a 2nd handshake fails).
+// Whoever opens TLS (CSV upload #7, realtime WSS #6, WAV #20) holds tlsMutex
+// while connected. uploadTask sets tlsWanted while it waits: a task holding a
+// long-lived connection (WSS) must then close it, give tlsMutex, and take it
+// again before reconnecting.
+extern SemaphoreHandle_t tlsMutex;
+extern volatile bool     tlsWanted;
+
+// TLS memory reserve. mbedTLS needs large *contiguous* blocks, but after SD
+// mount + tasks + WAV files the heap is fragmented (board: 72 KB free, largest
+// block 32 KB -> "SSL - Memory allocation failed"). So one TLS_RESERVE_BYTES
+// block is taken in setup() while the heap is still in one piece, freed by
+// the tlsMutex holder right before a TLS connect and taken back after.
+void tlsReserveInit();      // setup(): before SD mount / task start
+void tlsReserveRelease();   // call while holding tlsMutex, before connect
+void tlsReserveRetake();    // call while holding tlsMutex, after the connection is closed
+
 
 // =============================================================================
 //  Sensor State  (written by each sensor task under its own mutex)
@@ -125,6 +142,17 @@ extern bool rtcAvailable;
 extern volatile bool     netConnected;
 extern volatile int8_t   netRssi;        // dBm, 0 while disconnected
 extern volatile uint32_t netReconnects;  // successful reconnects since boot
+
+
+// =============================================================================
+//  CSV Upload Status  (single writer: uploadTask, issue #7)
+// =============================================================================
+
+extern volatile uint32_t uploadBacklogRows;   // rows on SD not sent yet (estimate)
+extern volatile uint32_t uploadChunksOk;      // chunks answered 200 since boot
+extern volatile uint32_t uploadRowsSkipped;   // rows given up on (see /upload_skipped.csv)
+extern volatile int16_t  uploadLastCode;      // last HTTP status (<0 = HTTPClient error)
+extern volatile bool     uploadStopped;       // 401 / bad URL: stopped until reboot
 
 
 // =============================================================================

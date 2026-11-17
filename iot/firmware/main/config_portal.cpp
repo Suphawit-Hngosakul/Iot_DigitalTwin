@@ -175,7 +175,7 @@ static void handleRoot() {
 
   b += F("<fieldset><legend>เซิร์ฟเวอร์</legend>");
   addField(b, "Ingest URL (อัป CSV)", "ingest", htmlEscape(s.ingestUrl),
-           "https://... (เว้นว่าง = ยังไม่ส่ง)", "url", "maxlength=\"128\"");
+           "http://<relay>:8080/ingest (เว้นว่าง = ยังไม่ส่ง)", "url", "maxlength=\"128\"");
   addField(b, "Presign URL (อัป WAV)", "presign", htmlEscape(s.presignUrl),
            "https://... (เว้นว่าง = ยังไม่ส่ง)", "url", "maxlength=\"128\"");
   addField(b, "Realtime WSS URL", "wss", htmlEscape(s.wssUrl),

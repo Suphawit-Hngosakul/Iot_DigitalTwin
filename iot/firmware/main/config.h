@@ -101,10 +101,17 @@
 #define NET_LOOP_MS 250           // netTask poll period
 
 // Server endpoints (used by #6 realtime / #7 CSV upload / #20 WAV upload).
-// [setup] defaults; empty = that feature stays off.
+// [setup] defaults; empty = that feature stays off. Put real URLs in
+// secrets.h (git-ignored) or the Setup page, not here: config.h is committed.
+#ifndef INGEST_URL
 #define INGEST_URL ""   // [setup] https://.../ingest
+#endif
+#ifndef PRESIGN_URL
 #define PRESIGN_URL ""  // [setup] https://.../presign
+#endif
+#ifndef WSS_URL
 #define WSS_URL ""      // [setup] wss://<hub>/device
+#endif
 
 // Device token for the server: secrets.h only (never in NVS / Setup page)
 #ifndef DEVICE_TOKEN
@@ -112,15 +119,34 @@
 #endif
 
 // =============================================================================
+//  CSV Upload to ingest  (issue #7, spec 10 §6, spec 20) — see csv_uploader.h
+//  Optional INGEST_ROOT_CA (PEM) in secrets.h: verify the server certificate.
+//  Without it TLS is encrypted but the server is not verified (setInsecure).
+// =============================================================================
+
+#define UPLOAD_CHUNK_ROWS      300     // rows per POST (spike #4: ~36 KB OK)
+#define UPLOAD_MIN_CHUNK_ROWS  25      // 413 halves the chunk down to this
+#define UPLOAD_CHUNK_MAX_BYTES 40960   // body cap incl. header (ingest max 1 MB)
+#define HTTP_TIMEOUT_MS        15000   // connect / TLS handshake / response
+#define UPLOAD_BACKOFF_MIN_MS  5000    // 429 / 5xx / timeout: doubles up to NET_BACKOFF_MAX_MS
+#define UPLOAD_CHUNK_GAP_MS    10000   // pause after each 200 so realtime (#6) can reconnect
+#define UPLOAD_PARTIAL_MS      300000  // file being written: send < full chunk after this long
+#define UPLOAD_POLL_MS         5000    // wait when WiFi / SD / TLS is not ready
+#define UPLOAD_ACTIVE_POLL_MS  30000   // wait for new rows when everything is sent
+#define UPLOAD_TLS_WAIT_MS     20000   // max wait for tlsMutex before trying again
+#define SD_MAX_OPEN_FILES      4       // FatFS keeps ~4.6 KB per slot from mount (default 5)
+#define TLS_RESERVE_BYTES      40960   // heap kept in one piece for TLS (see globals.h), 0 = off
+
+// =============================================================================
 //  Audio Recording (SD WAV)
 // =============================================================================
 
 #define SAMPLE_RATE 16000
 #define BITS_PER_SAMPLE 16
-#define BUFFER_CNT 8
+#define BUFFER_CNT 4 // I2S DMA buffers (spike #4: 8 -> 4 frees ~8 KB for TLS, no drops with pool 32)
 #define BUFFER_LEN 512
 #define RECORD_TIME 60 // [setup] seconds per WAV file
-#define AUDIO_POOL_SIZE 32 // ~1s of audio buffered while SD is busy (8 = only 256ms)
+#define AUDIO_POOL_SIZE 32 // ~1s of audio buffered while SD is busy (spike #4: keep >= 32, SD stalls ~470 ms)
 
 // =============================================================================
 //  SD Card
@@ -176,13 +202,16 @@
 //  FreeRTOS Task Stack Sizes
 // =============================================================================
 
-#define STACK_MIC 20000
-#define STACK_SD_PROCESS 20000
-#define STACK_GPS 4096
-#define STACK_LUX 4096
-#define STACK_DHT 4096
-#define STACK_OLED 8192
-#define STACK_NET 6144   // check "Stack free" in [NET] log, shrink after #4
+// Spike #4: with mic/SD stacks of 20000 the largest free block was ~43 KB and
+// the TLS handshake failed. Check the [STACK] log (bytes left) on the board.
+#define STACK_MIC 4096          // spike measured ~1 KB used
+#define STACK_SD_PROCESS 6144   // board: ~3.2 KB used ([STACK] 5004 left of 8192)
+#define STACK_GPS 3072   // board: ~1.6 KB used
+#define STACK_LUX 4096   // board: ~2.3 KB used (keep margin)
+#define STACK_DHT 3072   // board: ~1.5 KB used
+#define STACK_OLED 4096 // board: ~2.2 KB used
+#define STACK_NET 4096   // board: ~1.7 KB used
+#define STACK_UPLOAD 8192 // TLS handshake runs on this stack (spike #4: ~5.3 KB used)
 
 // =============================================================================
 //  OLED

@@ -50,7 +50,8 @@ static unsigned long lastRemountAttemptMs = 0;
 // =============================================================================
 
 static bool sdBegin() {
-  return SD_MMC.begin("/sdcard", true /* 1-bit */, false, 4000 /* kHz */);
+  return SD_MMC.begin("/sdcard", true /* 1-bit */, false, 4000 /* kHz */,
+                      SD_MAX_OPEN_FILES);
 }
 
 // Caller must hold sdMutex.
@@ -128,14 +129,15 @@ bool createCSVLog() {
     LOG("ERROR", "Cannot create log file %s", csvFileName);
     return false;
   }
-  csvFile.println("Device_ID,Device_Type,Session,Record_ID,"
-                  "DateTime,dBA,dB_SPL,Lux,Temp_C,Humidity_pct,Latitude,"
-                  "Longitude,Altitude_m,Speed_kmh,Satellites,HDOP,"
-                  "GPS_Valid,Lux_Valid,DHT_Valid,"
-                  "Time_Valid,SPL_Valid,Flags");
+  csvFile.println(CSV_HEADER);
   csvFile.flush();
   LOG("INFO", "Log file: %s", csvFileName);
   return true;
+}
+
+void csvActivePath(char *out, size_t len) {
+  MutexLock lock(sdMutex);
+  snprintf(out, len, "%s", csvFileName);
 }
 
 // Reopen the CSV for append after an SD remount. Caller must hold sdMutex.
