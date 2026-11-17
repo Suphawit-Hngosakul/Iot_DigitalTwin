@@ -72,7 +72,6 @@ def init_gee(config_dir: Path | None = None) -> None:
     search_dirs = [
         config_dir,
         Path(__file__).parent,
-        Path(__file__).parent.parent / "test_lambda",
         Path.cwd(),
     ]
     config_file = None
@@ -245,7 +244,7 @@ def run_ingest(
     date_end: str,
     bucket: str = DEFAULT_BUCKET,
     asset_roi: str = DEFAULT_ASSET_ROI,
-    summer_only: bool = True,
+    summer_only: bool = False,
     dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     """Find and ingest scenes within the date range."""
@@ -280,7 +279,7 @@ def lambda_handler(event: dict[str, Any] | None = None, context: Any = None) -> 
     """AWS Lambda entry point for scheduled or manual backfill."""
     event = event or {}
     bucket = event.get("bucket", os.environ.get("DATA_BUCKET", DEFAULT_BUCKET))
-    summer_only = event.get("summer_only", True)
+    summer_only = event.get("summer_only", False)  # รายฉากดึงทุกเดือน; composite เท่านั้นที่จำกัด มี.ค.-พ.ค.
     dry_run = event.get("dry_run", False)
 
     # If date range given in event, use it (backfill)

@@ -48,8 +48,9 @@ module "satellite" {
   source      = "./modules/satellite"
   name_prefix = var.name_prefix
   role_arn    = data.aws_iam_role.lab.arn
-  source_dir  = "${path.root}/../satellite/test_lambda"
-  layer_zip   = "${path.root}/../satellite/gee-layer.zip"
+  source_dir  = "${path.root}/../satellite/ingest"
+  layer_zip   = "${path.root}/../satellite/gee-layer.zip" # สร้างด้วย cloud/satellite/build_layer.sh (zip ถูก gitignore)
+  data_bucket = module.storage.bucket_name
   gee_project = var.gee_project
   gee_assets  = var.gee_assets
 }
