@@ -126,7 +126,10 @@ def prep_scene(img: ee.Image) -> ee.Image:
     ndvi = b5.subtract(b4).divide(b5.add(b4)).rename("ndvi")
     ndbi = b6.subtract(b5).divide(b6.add(b5)).rename("ndbi")
 
-    return lst.addBands([ndvi, ndbi, clear]).copyProperties(img, ["system:time_start", "system:index"])
+    out = lst.addBands([ndvi, ndbi, clear]).copyProperties(
+        img, ["system:time_start", "system:index"]
+    )
+    return ee.Image(out)
 
 
 def check_scene_completed(bucket: str, prefix: str) -> bool:
