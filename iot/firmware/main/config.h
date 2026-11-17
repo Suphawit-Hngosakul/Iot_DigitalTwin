@@ -67,7 +67,7 @@
 #define EMA_ALPHA 0.3f
 
 // =============================================================================
-//  WiFi / NTP  (boot-time RTC sync only; WiFi is turned off afterwards)
+//  WiFi / NTP / Network  (issue #5, spec 10 §4)
 // =============================================================================
 
 // WiFi credentials are NOT stored in this file. Set them from the Setup Mode
@@ -91,6 +91,25 @@
 #define NTP_SERVER "pool.ntp.org"
 #define NTP_GMT_OFFSET 25200 // UTC+7
 #define NTP_DAYLIGHT_OFFSET 0
+
+// 1 = keep WiFi on after boot: netTask reconnects with backoff and re-syncs
+//     NTP -> RTC on every reconnect (+ hourly while connected).
+// 0 = old behaviour: WiFi only at boot for NTP, then off (saves RAM/power).
+#define NET_ENABLED 1
+#define NET_BACKOFF_MIN_MS 1000   // first retry after a drop
+#define NET_BACKOFF_MAX_MS 60000  // backoff doubles up to this
+#define NET_LOOP_MS 250           // netTask poll period
+
+// Server endpoints (used by #6 realtime / #7 CSV upload / #20 WAV upload).
+// [setup] defaults; empty = that feature stays off.
+#define INGEST_URL ""   // [setup] https://.../ingest
+#define PRESIGN_URL ""  // [setup] https://.../presign
+#define WSS_URL ""      // [setup] wss://<hub>/device
+
+// Device token for the server: secrets.h only (never in NVS / Setup page)
+#ifndef DEVICE_TOKEN
+#define DEVICE_TOKEN ""
+#endif
 
 // =============================================================================
 //  Audio Recording (SD WAV)
@@ -163,6 +182,7 @@
 #define STACK_LUX 4096
 #define STACK_DHT 4096
 #define STACK_OLED 8192
+#define STACK_NET 6144   // check "Stack free" in [NET] log, shrink after #4
 
 // =============================================================================
 //  OLED

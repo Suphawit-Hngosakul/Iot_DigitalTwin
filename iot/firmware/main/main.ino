@@ -10,6 +10,7 @@
 #include "wifi_ntp.h"
 
 #include <Wire.h>
+#include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 
 
@@ -33,6 +34,10 @@ static const TaskSpec kTasks[] = {
   { luxTask,         "luxTask",        STACK_LUX,        1,    0 },
   { dhtTask,         "dhtTask",        STACK_DHT,        1,    0 },
   { oledTask,        "oledTask",       STACK_OLED,       1,    0 },
+#if NET_ENABLED
+  // Below mic/SD (prio 0): network is optional, SD is the source of truth
+  { netTask,         "netTask",        STACK_NET,        0,    0 },
+#endif
 };
 
 
@@ -120,7 +125,7 @@ void setup() {
   if (configButtonRequested())
     runConfigPortal();
 
-  // ── NTP -> RTC (WiFi off afterwards) ─────────────────────────────────────
+  // ── NTP -> RTC (WiFi stays on for netTask when NET_ENABLED) ──────────────
   if (rtcAvailable) {
     oledShowStatus("NTP Sync", "WiFi connecting...",
                    settings.wifiSsid1[0] ? settings.wifiSsid1 : settings.wifiSsid2);
@@ -180,15 +185,19 @@ void loop() {
   GPSData g; LuxData l; DHTData d;
   readGPSSafe(g); readLuxSafe(l); readDHTSafe(d);
 
-  LOG("STAT", "%s | Heap:%u | SDFree:%luMB | SPL:%.1fdB (A %.1fdBA) | "
+  LOG("STAT", "%s | Heap:%u MaxBlk:%u | SDFree:%luMB | SPL:%.1fdB (A %.1fdBA) | "
       "Lux:%.1flux | Temp:%.1fC | Humi:%.1f%% | "
-      "GPS:%s(%.6f,%.6f) S:%d HDOP:%.1f | SD:%s | Rec:%s",
-      settings.deviceId, ESP.getFreeHeap(), (unsigned long)sdFreeMB, currentSPL, currentSPLA,
+      "GPS:%s(%.6f,%.6f) S:%d HDOP:%.1f | SD:%s | Rec:%s | "
+      "WiFi:%s RSSI:%d Reconn:%lu",
+      settings.deviceId, ESP.getFreeHeap(),
+      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+      (unsigned long)sdFreeMB, currentSPL, currentSPLA,
       l.valid ? l.value : -1.0f,
       d.valid ? d.temp : -99.0f, d.valid ? d.humidity : -1.0f,
       g.valid ? "FIX " : "NoFx", g.lat, g.lng, g.sats, g.hdop,
       sdAvailable ? "OK" : "NONE",
-      isRecording ? "YES" : "No");
+      isRecording ? "YES" : "No",
+      netConnected ? "UP" : "DOWN", (int)netRssi, (unsigned long)netReconnects);
 
   delay(10000);
 }

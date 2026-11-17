@@ -119,6 +119,15 @@ extern bool rtcAvailable;
 
 
 // =============================================================================
+//  Network Status  (single writer: netTask; read by loop() health line)
+// =============================================================================
+
+extern volatile bool     netConnected;
+extern volatile int8_t   netRssi;        // dBm, 0 while disconnected
+extern volatile uint32_t netReconnects;  // successful reconnects since boot
+
+
+// =============================================================================
 //  Audio Pool
 //  micTask -> readyQueue -> sdProcessTask -> freeQueue
 // =============================================================================

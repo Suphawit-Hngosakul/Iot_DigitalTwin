@@ -128,7 +128,7 @@ static void handleRoot() {
   const RuntimeSettings &s = settings;
 
   String b;
-  b.reserve(6000);
+  b.reserve(7500);
   b += F("<h1>IoT-Walking : ตั้งค่า</h1>");
 
   // ── RTC ──────────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ static void handleRoot() {
   }
   b += F("</select><small>ใส่ลงทุกแถวของ CSV คู่กับ Session และ Record_ID</small></fieldset>");
 
-  b += F("<fieldset><legend>WiFi สำหรับ sync เวลา (NTP)</legend>");
+  b += F("<fieldset><legend>WiFi (sync เวลา NTP + ส่งข้อมูล)</legend>");
   addField(b, "SSID 1", "ssid1", htmlEscape(s.wifiSsid1), "", "text", "maxlength=\"32\"");
   addField(b, "รหัสผ่าน 1", "pass1", "", s.wifiPass1[0] ? "เว้นว่าง = ใช้รหัสเดิม" : "",
            "password", "maxlength=\"64\" autocomplete=\"off\"");
@@ -172,6 +172,17 @@ static void handleRoot() {
   addField(b, "รหัสผ่าน 2", "pass2", "", s.wifiPass2[0] ? "เว้นว่าง = ใช้รหัสเดิม" : "",
            "password", "maxlength=\"64\" autocomplete=\"off\"");
   b += F("<small>ลบ SSID ออก = ไม่ใช้ WiFi ชุดนั้น (รหัสจะถูกลบด้วย)</small></fieldset>");
+
+  b += F("<fieldset><legend>เซิร์ฟเวอร์</legend>");
+  addField(b, "Ingest URL (อัป CSV)", "ingest", htmlEscape(s.ingestUrl),
+           "https://... (เว้นว่าง = ยังไม่ส่ง)", "url", "maxlength=\"128\"");
+  addField(b, "Presign URL (อัป WAV)", "presign", htmlEscape(s.presignUrl),
+           "https://... (เว้นว่าง = ยังไม่ส่ง)", "url", "maxlength=\"128\"");
+  addField(b, "Realtime WSS URL", "wss", htmlEscape(s.wssUrl),
+           "wss://.../device (เว้นว่าง = ยังไม่ส่ง)", "text", "maxlength=\"128\"");
+  b += F("<small>Token ของเครื่องตั้งใน secrets.h (DEVICE_TOKEN) เท่านั้น ");
+  b += DEVICE_TOKEN[0] ? F("- ตั้งแล้ว") : F("- <b>ยังไม่ได้ตั้ง</b>");
+  b += F("</small></fieldset>");
 
   b += F("<fieldset><legend>Calibration</legend>");
   addField(b, "MIC_OFFSET_DB (dB)", "mic", fmtFloat(s.micOffsetDb, 2),
@@ -294,6 +305,21 @@ static void argWifi(const char *ssidKey, const char *passKey,
 }
 
 
+// URL field: empty, or http(s):// (ws(s):// when websocket) up to 128 chars.
+static void argUrl(const char *name, bool websocket, char *dst, String &err) {
+  String v = server.arg(name);
+  v.trim();
+  if (!settingsUrlValid(v.c_str(), websocket)) {
+    err += name;
+    err += websocket ? F(" ต้องขึ้นต้นด้วย wss:// หรือ ws://")
+                     : F(" ต้องขึ้นต้นด้วย https:// หรือ http://");
+    err += F(" ไม่มีช่องว่าง และยาวไม่เกิน 128 ตัว (หรือเว้นว่าง)<br>");
+    return;
+  }
+  strncpy(dst, v.c_str(), SETTINGS_URL_LEN - 1);
+  dst[SETTINGS_URL_LEN - 1] = '\0';
+}
+
 // Device ID (empty -> MAC default) + Device Type.
 static void argDevice(RuntimeSettings &n, String &err) {
   String id = server.arg("devid");
@@ -334,6 +360,10 @@ static void handleSave() {
   argUInt("rec",   5,   3600,   n.recordTimeSec, err);
   argUInt("csv",   100, 60000,  n.csvIntervalMs, err);
   argUInt("sdmin", 0,   100000, n.sdMinFreeMb,   err);
+
+  argUrl("ingest",  false, n.ingestUrl,  err);
+  argUrl("presign", false, n.presignUrl, err);
+  argUrl("wss",     true,  n.wssUrl,     err);
 
   if (err.length()) {
     sendResult(String(F("ยังไม่ได้บันทึก ค่าไม่ถูกต้อง:<br>")) + err, true, false);
