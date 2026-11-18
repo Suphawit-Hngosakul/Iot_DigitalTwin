@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Realtime hub — หน้าทดสอบ</title>
+<style>
+  :root { font-family: system-ui, sans-serif; color: #1d2433; background: #f5f6f8; }
+  body { margin: 0; padding: 16px; max-width: 980px; margin-inline: auto; }
+  h1 { font-size: 1.15rem; margin: 0 0 12px; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  input { flex: 1 1 320px; padding: 6px 8px; font: inherit; border: 1px solid #c9ced8; border-radius: 6px; }
+  button { padding: 6px 14px; font: inherit; border-radius: 6px; border: 1px solid #3a5bd9; background: #3a5bd9; color: #fff; cursor: pointer; }
+  #conn { font-size: .9rem; margin-bottom: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+  .card { background: #fff; border: 1px solid #dde1e8; border-radius: 10px; padding: 12px 14px; }
+  .card h2 { font-size: 1rem; margin: 0 0 6px; display: flex; justify-content: space-between; align-items: center; }
+  .pill { font-size: .75rem; padding: 2px 8px; border-radius: 99px; background: #e4e7ec; }
+  .on { background: #d6f5df; color: #13612d; } .off { background: #fbe0e0; color: #8a1c1c; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; font-variant-numeric: tabular-nums; }
+  td { padding: 2px 0; } td:last-child { text-align: right; }
+  .muted { color: #6b7385; font-size: .8rem; }
+  pre { background: #fff; border: 1px solid #dde1e8; border-radius: 8px; padding: 8px; font-size: .75rem; max-height: 220px; overflow: auto; }
+</style>
+</head>
+<body>
+<h1>Realtime hub — หน้าทดสอบ (#10)</h1>
+<form id="f">
+  <input id="url" placeholder="ws://<eip>:8081/live?device=all" required>
+  <button>เชื่อมต่อ</button>
+</form>
+<div id="conn" class="muted">ยังไม่เชื่อมต่อ (ใส่ URL หรือเปิดหน้านี้ด้วย ?hub=ws://…/live)</div>
+<div class="grid" id="cards"></div>
+<p class="muted">ข้อความล่าสุด</p>
+<pre id="log"></pre>
+<script>
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+$("url").value = params.get("hub") || localStorage.getItem("hubUrl") || "";
+let ws, retry = 1000;
+const devices = {};
+
+function fmt(v, d = 1) { return (v === undefined || v === null) ? "–" : Number(v).toFixed(d); }
+function age(iso) {
+  if (!iso) return "–";
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  return s < 60 ? `${s.toFixed(0)} วินาทีที่แล้ว` : `${(s / 60).toFixed(1)} นาทีที่แล้ว`;
+}
+
+function render() {
+  const ids = Object.keys(devices).sort();
+  $("cards").innerHTML = ids.map((id) => {
+    const d = devices[id], r = d.reading || {}, h = r.health || {};
+    const pill = d.online === undefined ? "" :
+      `<span class="pill ${d.online ? "on" : "off"}">${d.online ? "online" : "offline"}</span>`;
+    return `<div class="card"><h2>${id} ${pill}</h2><table>
+      <tr><td>dB(SPL) / dBA</td><td>${fmt(r.db_spl)} / ${fmt(r.dba)}</td></tr>
+      <tr><td>อุณหภูมิ / ความชื้น</td><td>${fmt(r.temp_c)} °C / ${fmt(r.humidity_pct)} %</td></tr>
+      <tr><td>Lux</td><td>${fmt(r.lux)}</td></tr>
+      <tr><td>GPS</td><td>${r.gps_valid ? `${fmt(r.lat, 6)}, ${fmt(r.lon, 6)}` : "ไม่มี fix"}</td></tr>
+      <tr><td>Session / Record</td><td>${r.session ?? "–"} / ${r.record_id ?? "–"}</td></tr>
+      <tr><td>เวลาเครื่อง</td><td>${r.ts ?? "–"}</td></tr>
+      <tr><td>hub ได้รับ</td><td>${age(r.received_at)}</td></tr>
+      <tr><td>heap / max block</td><td>${h.heap_free ?? "–"} / ${h.heap_max_block ?? "–"}</td></tr>
+      <tr><td>RSSI / backlog</td><td>${h.rssi ?? "–"} dBm / ${h.backlog_rows ?? "–"} แถว</td></tr>
+    </table></div>`;
+  }).join("") || '<p class="muted">ยังไม่มีข้อมูลจากเครื่องใด</p>';
+}
+
+function log(text) {
+  const el = $("log");
+  el.textContent = (text + "\n" + el.textContent).slice(0, 6000);
+}
+
+function connect() {
+  const url = $("url").value.trim();
+  if (!url) return;
+  localStorage.setItem("hubUrl", url);
+  if (ws) { ws.onclose = null; ws.close(); }
+  $("conn").textContent = `กำลังเชื่อมต่อ ${url} …`;
+  ws = new WebSocket(url);
+  ws.onopen = () => { retry = 1000; $("conn").textContent = `เชื่อมต่อแล้ว: ${url}`; };
+  ws.onmessage = (ev) => {
+    log(ev.data);
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (!m.device_id) return;
+    const d = devices[m.device_id] ||= {};
+    if (m.t === "status") d.online = m.online;
+    if (m.t === "reading") { d.reading = m; d.online = true; }
+    render();
+  };
+  ws.onclose = () => {
+    $("conn").textContent = `หลุด — ลองใหม่ใน ${retry / 1000} วินาที`;
+    setTimeout(connect, retry);
+    retry = Math.min(retry * 2, 30000);
+  };
+}
+
+$("f").onsubmit = (e) => { e.preventDefault(); retry = 1000; connect(); };
+setInterval(render, 1000);
+render();
+if ($("url").value) connect();
+</script>
+</body>
+</html>

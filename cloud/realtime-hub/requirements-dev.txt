@@ -1,0 +1,3 @@
+# สำหรับรันเทสต์ในเครื่อง
+-r requirements.txt
+pytest

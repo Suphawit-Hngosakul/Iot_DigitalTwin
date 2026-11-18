@@ -12,6 +12,16 @@ output "relay_url" {
   value       = var.relay_enabled ? module.relay[0].relay_url : null
 }
 
+output "hub_device_url" {
+  description = "Put in the firmware as wssUrl (plain ws://, D22)"
+  value       = var.relay_enabled ? module.relay[0].hub_device_url : null
+}
+
+output "hub_live_url" {
+  description = "For live.html / the web: <this>?device=all"
+  value       = var.relay_enabled ? module.relay[0].hub_live_url : null
+}
+
 output "pipeline_state_machine_arn" {
   description = "aws stepfunctions start-execution --state-machine-arn <this> --input '{\"batch_ids\":[...]}'"
   value       = module.pipeline.state_machine_arn
