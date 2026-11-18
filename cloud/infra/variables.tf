@@ -26,6 +26,12 @@ variable "relay_enabled" {
   default     = true
 }
 
+variable "hub_enabled" {
+  description = "Run the realtime hub (ws:// :8081, spec 22) on the relay EC2. Needs relay_enabled."
+  type        = bool
+  default     = true
+}
+
 variable "relay_ssh_cidrs" {
   description = "Open port 22 on the relay for logs, e.g. [\"18.206.107.24/29\"] for EC2 Instance Connect in us-east-1. Empty = closed."
   type        = list(string)

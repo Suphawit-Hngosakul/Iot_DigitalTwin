@@ -6,7 +6,7 @@
 |---|---|---|
 | `ingest/` | Lambda รับ CSV จากอุปกรณ์ → S3 `raw/` | API Gateway + Lambda |
 | `presign/` | Lambda ออก presigned URL ให้อุปกรณ์อัป WAV | API Gateway + Lambda |
-| `realtime-hub/` | WebSocket hub (realtime + สตรีมเสียงในเฟสเว็บ) | Docker บน EC2 |
+| `realtime-hub/` | WebSocket hub (realtime + สตรีมเสียงในเฟสเว็บ) | systemd บน EC2 ตัวเดียวกับ relay (D22) |
 | `pipeline/` | Step Functions + Lambda 5 ตัว (รายชั่วโมง) | Step Functions |
 | `api/` | API ให้เว็บดึงข้อมูลที่ผ่าน pipeline (อ่าน Athena) | API Gateway + Lambda |
 | `satellite/` | ดึง Landsat + ข้อมูลอาคารจาก GEE และ pipeline ดาวเทียม → กริด 90 m + layer | Lambda (container) + Step Functions |

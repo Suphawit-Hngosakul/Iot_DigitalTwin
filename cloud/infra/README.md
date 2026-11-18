@@ -12,7 +12,7 @@ IaC ของทุกอย่างใน `cloud/` ด้วย **Terraform/Op
 |---|---|---|---|
 | `storage` | 01 | #9, #17 | S3 bucket (block public, SSE-S3, BucketOwnerEnforced) + lifecycle (`athena-results/` 7 วัน) |
 | `ingest` | 20 | #9 | Lambda `iot-dt-ingest` (Py3.12, LabRole) + HTTP API `POST /ingest` + log 14 วัน |
-| `relay` | 10 | #7 | EC2 t3.micro + Elastic IP + SG port 8080: รับ HTTP จากบอร์ด ส่งต่อ HTTPS ไป ingest (`cloud/relay/`) ปิดได้ด้วย `relay_enabled = false` |
+| `relay` | 10, 22 | #7, #10 | EC2 t3.micro + Elastic IP + SG port 8080/8081: relay รับ HTTP จากบอร์ดส่งต่อ HTTPS ไป ingest (`cloud/relay/`) + realtime hub `ws://` (`cloud/realtime-hub/`, D22; ปิดเฉพาะ hub ด้วย `hub_enabled = false`, URL ดู `terraform output hub_device_url` / `hub_live_url`) ปิดทั้งเครื่องด้วย `relay_enabled = false` |
 | `pipeline` | 30 | #11–#16 | Lambda 6 ตัว `iot-dt-iot-*` + Step Functions `iot-dt-iot-pipeline` + Scheduler ทุกชั่วโมงนาทีที่ 5 (เวลาไทย) + SNS `iot-dt-iot-pipeline-alerts` (`cloud/pipeline/`) |
 | `catalog` | 40 | #17 | Glue database `iot_walking` + ตาราง `raw_csv`, `raw_csv_unknown`, `readings_1s`, `readings_1min`, `quality` (partition projection) + Athena workgroup `iot_walking` + saved queries + lifecycle `athena-results/` 7 วัน (ใน `storage`) |
 | `api` | 40 | #18 | Lambda `iot-dt-api` (Py3.12, LabRole) + HTTP API แยก `iot-dt-api`: `GET /devices /latest /readings /quality` + CORS (`api_allowed_origins`) + log 14 วัน (`cloud/api/`) |

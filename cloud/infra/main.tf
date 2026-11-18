@@ -34,14 +34,18 @@ module "ingest" {
   common_dir          = "${path.root}/../pipeline/common"
 }
 
-# Plain HTTP relay for boards without RAM for TLS (decision 2026-11-17).
+# Plain HTTP relay for boards without RAM for TLS (decision 2026-11-17),
+# plus the realtime hub on the same EC2 (ws:// :8081, D22, spec 22).
 module "relay" {
-  count        = var.relay_enabled ? 1 : 0
-  source       = "./modules/relay"
-  name_prefix  = var.name_prefix
-  upstream_url = module.ingest.ingest_url
-  source_dir   = "${path.root}/../relay"
-  ssh_cidrs    = var.relay_ssh_cidrs
+  count               = var.relay_enabled ? 1 : 0
+  source              = "./modules/relay"
+  name_prefix         = var.name_prefix
+  upstream_url        = module.ingest.ingest_url
+  source_dir          = "${path.root}/../relay"
+  ssh_cidrs           = var.relay_ssh_cidrs
+  hub_enabled         = var.hub_enabled
+  hub_source_dir      = "${path.root}/../realtime-hub"
+  device_token_hashes = var.device_token_hashes
 }
 
 # IoT hourly pipeline (spec 30, #11-#16).
