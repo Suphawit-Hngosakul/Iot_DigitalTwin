@@ -74,7 +74,7 @@ variable "api_allowed_origins" {
 }
 
 variable "satellite_enabled" {
-  description = "Deploy the GEE test Lambda + layer (#25). Build the layer first: python cloud/satellite/layer/build_layer.py"
+  description = "Deploy the GEE layer + test Lambda (#25) + satellite_ingest with its daily schedule (#27). Build the layer first: python cloud/satellite/layer/build_layer.py"
   type        = bool
   default     = false
 }
@@ -111,4 +111,22 @@ variable "gee_wif" {
     provider_id     = "aws-pool-gee-iot"
     service_account = "service-gee-iot@turnkey-tribute-511903-t6.iam.gserviceaccount.com"
   }
+}
+
+variable "satellite_ingest_schedule" {
+  description = "When satellite_ingest (#27) runs. Default daily 02:00 UTC = 09:00 Thai (spec 50 §3). \"\" = manual runs only."
+  type        = string
+  default     = "cron(0 2 * * ? *)"
+}
+
+variable "satellite_max_cloud_pct" {
+  description = "satellite_ingest skips a scene date with more cloud than this inside the AOI (spec 50 §5 MAX_CLOUD_PCT)"
+  type        = number
+  default     = 40
+}
+
+variable "satellite_min_valid_ratio" {
+  description = "satellite_ingest also skips a scene date when fewer than this share of AOI pixels are clear (0-1)"
+  type        = number
+  default     = 0.15
 }

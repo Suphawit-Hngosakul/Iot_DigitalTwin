@@ -85,7 +85,7 @@ module "api" {
   allowed_origins  = var.api_allowed_origins
 }
 
-# GEE connectivity test Lambda via Workload Identity Federation (spec 50, #25).
+# GEE Lambdas via Workload Identity Federation (spec 50): test (#25) + satellite_ingest (#27).
 # Off by default: needs gee-layer.zip built by cloud/satellite/layer/build_layer.py.
 module "satellite" {
   count        = var.satellite_enabled ? 1 : 0
@@ -97,4 +97,11 @@ module "satellite" {
   gee_project  = var.gee_project
   gee_assets   = var.gee_assets
   gee_wif      = var.gee_wif
+
+  # satellite_ingest (#27): Landsat -> S3 raw/satellite/, same layer + WIF as the test Lambda
+  ingest_source_dir      = "${path.root}/../satellite/ingest"
+  data_bucket            = module.storage.bucket_name
+  ingest_schedule        = var.satellite_ingest_schedule
+  ingest_max_cloud_pct   = var.satellite_max_cloud_pct
+  ingest_min_valid_ratio = var.satellite_min_valid_ratio
 }

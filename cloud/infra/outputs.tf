@@ -61,3 +61,8 @@ output "gee_layer_arn" {
   description = "GEE Lambda layer ARN, reuse for satellite_ingest (#27); null when satellite_enabled = false"
   value       = one(module.satellite[*].layer_arn)
 }
+
+output "satellite_ingest_function_name" {
+  description = "satellite_ingest Lambda (#27), null when satellite_enabled = false"
+  value       = one(module.satellite[*].ingest_function_name)
+}
