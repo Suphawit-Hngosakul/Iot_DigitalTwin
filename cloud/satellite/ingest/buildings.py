@@ -83,7 +83,7 @@ def _paint_mask(fc: ee.FeatureCollection, band_name: str) -> ee.Image:
 def run_buildings_ingest(
     dry_run: bool = False,
     force: bool = False,
-    conf_min: Optional_float = None,
+    conf_min: float | None = None,
 ) -> Dict[str, Any]:
     """คำนวณค่าสรุปอาคารต่อเซลล์ 90 m ใน GEE และอัปโหลดลง S3"""
     bucket = os.environ.get("DATA_BUCKET")
