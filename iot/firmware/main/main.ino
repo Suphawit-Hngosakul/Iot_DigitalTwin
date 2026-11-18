@@ -8,9 +8,12 @@
 #include "settings.h"
 #include "config_portal.h"
 #include "wifi_ntp.h"
+#include "csv_uploader.h"
+#include "rt_client.h"
 
 #include <Wire.h>
 #include <esp_heap_caps.h>
+#include <esp_system.h>
 #include <esp_task_wdt.h>
 
 
@@ -37,9 +40,60 @@ static const TaskSpec kTasks[] = {
 #if NET_ENABLED
   // Below mic/SD (prio 0): network is optional, SD is the source of truth
   { netTask,         "netTask",        STACK_NET,        0,    0 },
+  // CSV -> ingest (#7): lowest priority, one TLS connection at a time
+  { uploadTask,      "uploadTask",     STACK_UPLOAD,     0,    0 },
+  // Realtime to the hub (#6): plain ws://, best-effort, drops what it cannot send
+  { rtTask,          "rtTask",         STACK_RT,         0,    0 },
 #endif
 };
 
+
+// =============================================================================
+//  Reset Reason — why did the last session end?
+//  RTC_NOINIT memory keeps its value over a software reset, panic or watchdog
+//  reset (not a power cut), so loop() leaves the uptime and lowest free heap
+//  of this session there and the next boot can report them.
+// =============================================================================
+
+static const uint32_t RESET_INFO_MAGIC = 0x52535431;   // "RST1"
+static RTC_NOINIT_ATTR uint32_t rstMagic;
+static RTC_NOINIT_ATTR uint32_t rstUptimeSec;
+static RTC_NOINIT_ATTR uint32_t rstMinHeap;
+
+static esp_reset_reason_t bootReason;
+static uint32_t           prevUptimeSec = 0;
+static uint32_t           prevMinHeap   = 0;
+
+static const char *resetReasonName(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:   return "POWERON";     // power plugged in / EN button
+    case ESP_RST_EXT:       return "EXT";
+    case ESP_RST_SW:        return "SW";          // ESP.restart()
+    case ESP_RST_PANIC:     return "PANIC";       // crash / abort / assert
+    case ESP_RST_INT_WDT:   return "INT_WDT";     // interrupts off too long
+    case ESP_RST_TASK_WDT:  return "TASK_WDT";    // a task stopped feeding the WDT
+    case ESP_RST_WDT:       return "OTHER_WDT";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT";    // supply voltage dropped
+    case ESP_RST_SDIO:      return "SDIO";
+    default:                return "UNKNOWN";
+  }
+}
+
+// Call first thing in setup(), before the RTC_NOINIT values are overwritten.
+static void readResetInfo() {
+  bootReason = esp_reset_reason();
+  if (rstMagic == RESET_INFO_MAGIC && bootReason != ESP_RST_POWERON) {
+    prevUptimeSec = rstUptimeSec;
+    prevMinHeap   = rstMinHeap;
+  }
+  rstMagic     = RESET_INFO_MAGIC;
+  rstUptimeSec = 0;
+  rstMinHeap   = 0;
+  LOG("BOOT", "Reset reason: %s (%d) | previous session: up %lus, min heap %lu",
+      resetReasonName(bootReason), (int)bootReason,
+      (unsigned long)prevUptimeSec, (unsigned long)prevMinHeap);
+}
 
 // =============================================================================
 //  Init Helpers
@@ -97,6 +151,7 @@ void setup() {
   Serial.begin(115200);
   delay(500);
   LOG("INFO", "Sound + GPS + Lux + DHT22 Logger Starting...");
+  readResetInfo();
 
   createQueuesAndMutexes();
 
@@ -156,6 +211,8 @@ void setup() {
 
   // ── SD Card + CSV ────────────────────────────────────────────────────────
   initSD();
+  appendBootLog(sessionId(), (int)bootReason, resetReasonName(bootReason),
+                prevUptimeSec, prevMinHeap);
 
   // ── Watchdog: panic + reboot if any registered task hangs ───────────────
   esp_task_wdt_config_t wdtCfg = {
@@ -182,13 +239,17 @@ void setup() {
 // =============================================================================
 
 void loop() {
+  rstUptimeSec = millis() / 1000;            // read by the next boot (see readResetInfo)
+  rstMinHeap   = ESP.getMinFreeHeap();
+
   GPSData g; LuxData l; DHTData d;
   readGPSSafe(g); readLuxSafe(l); readDHTSafe(d);
 
   LOG("STAT", "%s | Heap:%u MaxBlk:%u | SDFree:%luMB | SPL:%.1fdB (A %.1fdBA) | "
       "Lux:%.1flux | Temp:%.1fC | Humi:%.1f%% | "
       "GPS:%s(%.6f,%.6f) S:%d HDOP:%.1f | SD:%s | Rec:%s | "
-      "WiFi:%s RSSI:%d Reconn:%lu",
+      "WiFi:%s RSSI:%d Reconn:%lu | Up:%s Backlog:%lu OK:%lu Skip:%lu Code:%d | "
+      "RT:%s Sent:%lu Reconn:%lu",
       settings.deviceId, ESP.getFreeHeap(),
       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
       (unsigned long)sdFreeMB, currentSPL, currentSPLA,
@@ -197,7 +258,27 @@ void loop() {
       g.valid ? "FIX " : "NoFx", g.lat, g.lng, g.sats, g.hdop,
       sdAvailable ? "OK" : "NONE",
       isRecording ? "YES" : "No",
-      netConnected ? "UP" : "DOWN", (int)netRssi, (unsigned long)netReconnects);
+      netConnected ? "UP" : "DOWN", (int)netRssi, (unsigned long)netReconnects,
+      uploadStopped ? "STOP" : "on", (unsigned long)uploadBacklogRows,
+      (unsigned long)uploadChunksOk, (unsigned long)uploadRowsSkipped, (int)uploadLastCode,
+      rtStopped ? "STOP" : (rtConnected ? "UP" : "down"),
+      (unsigned long)rtSent, (unsigned long)rtReconnects);
+
+  // Stack left per task (bytes, lowest so far) every 60 s: tune STACK_* in
+  // config.h with it. Looked up by name: micTask deletes itself on I2S failure.
+  static uint8_t stackTick = 0;
+  if (++stackTick >= 6) {
+    stackTick = 0;
+    char buf[200] = "";
+    size_t n = 0;
+    for (const TaskSpec &t : kTasks) {
+      TaskHandle_t h = xTaskGetHandle(t.name);
+      if (h && n < sizeof(buf))
+        n += snprintf(buf + n, sizeof(buf) - n, "%s:%u ", t.name,
+                      (unsigned)uxTaskGetStackHighWaterMark(h));
+    }
+    LOG("STACK", "%s", buf);
+  }
 
   delay(10000);
 }

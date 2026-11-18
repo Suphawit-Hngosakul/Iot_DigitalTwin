@@ -1,0 +1,14 @@
+[Unit]
+Description=IoT Digital Twin HTTP -> HTTPS ingest relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/iot-dt-relay.env
+ExecStart=/usr/bin/python3 /opt/iot-dt-relay/relay.py
+Restart=always
+RestartSec=3
+DynamicUser=yes
+
+[Install]
+WantedBy=multi-user.target

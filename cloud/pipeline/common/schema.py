@@ -301,7 +301,7 @@ READINGS_1S: tuple[tuple[str, str], ...] = (
     ("hdop", "double"),
 )
 
-# Sound per minute = plain mean/max/min of the 1 s values for now (no Leq yet).
+# Sound per minute = plain mean/max/min of the 1 s values (decided: no Leq).
 READINGS_1MIN: tuple[tuple[str, str], ...] = (
     ("minute_local", "timestamp"),
     ("minute_utc", "timestamp"),
@@ -437,6 +437,13 @@ def s3_key_raw(device_id: str, d: date | str | None, hour: int | str | None,
             raise ValueError(f"bad hour: {hour}")
         h_s = f"{h:02d}"
     return f"raw/csv/device_id={device_id}/date={d_s}/hour={h_s}/part-{chunk_id}.csv"
+
+
+def raw_prefix(batch_id: str) -> str:
+    """S3 prefix holding every raw chunk of one batch (ends with '/')."""
+    b = parse_batch_id(batch_id)
+    return (f"raw/csv/device_id={b.device_id}/date={b.date.isoformat()}/"
+            f"hour={b.hour:02d}/")
 
 
 def s3_key_processed(table: str, batch_id: str) -> str:

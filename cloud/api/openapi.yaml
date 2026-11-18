@@ -1,0 +1,241 @@
+openapi: 3.0.3
+info:
+  title: IoT Walking API
+  version: 0.1.0
+  description: |
+    API ให้เว็บดึงข้อมูล IoT ที่ผ่าน pipeline แล้ว (issue #18, spec 40 §3)
+    อ่านจาก Athena (database/workgroup `iot_walking`) และ publish marker ใน S3
+
+    - เวลา `from` / `to` เป็น ISO 8601 ถ้าไม่มี offset ถือเป็นเวลาไทย (UTC+7) ถ้ามี offset (`Z`, `+07:00`)
+      จะแปลงเป็นเวลาไทยให้ ช่วงเวลาเป็น [from, to)
+    - เวลาที่ตอบกลับ (`*_local`) เป็นเวลาไทยไม่มี offset, `*_utc` เป็น UTC ไม่มี offset
+    - ผลลัพธ์เดียวกันถูก cache ใน Lambda 60 วินาที
+    - endpoint ดาวเทียม (`/layers`, `/grid`, `/analytics`) ทำใน #34
+servers:
+  - url: https://{api_id}.execute-api.us-east-1.amazonaws.com
+    variables:
+      api_id:
+        default: xxxxxxxxxx
+        description: ดูจาก `terraform output api_url`
+
+paths:
+  /devices:
+    get:
+      summary: รายการเครื่อง + ชั่วโมงล่าสุดที่ publish
+      operationId: listDevices
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices]
+                properties:
+                  devices:
+                    type: array
+                    items: { $ref: "#/components/schemas/Device" }
+
+  /latest:
+    get:
+      summary: แถวล่าสุดใน readings_1min ของเครื่อง
+      operationId: getLatest
+      parameters:
+        - $ref: "#/components/parameters/device"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device, row]
+                properties:
+                  device: { type: string, example: IOTW-A001 }
+                  row: { $ref: "#/components/schemas/Reading1min" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/Upstream" }
+        "504": { $ref: "#/components/responses/Timeout" }
+
+  /readings:
+    get:
+      summary: ค่าที่วัดได้ในช่วงเวลา
+      description: |
+        `interval=1s` อ่าน readings_1s ช่วงไม่เกิน 6 ชม., `interval=1min` อ่าน readings_1min ช่วงไม่เกิน 31 วัน
+        เกินได้ 400 ผลลัพธ์เป็นตาราง (`columns` + `rows`) เพื่อให้ response เล็ก
+        (1s × 6 ชม. ≈ 21,600 แถว ถ้าเป็น object ต่อแถวจะเกินเพดาน 6 MB ของ Lambda)
+      operationId: getReadings
+      parameters:
+        - $ref: "#/components/parameters/device"
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+        - name: interval
+          in: query
+          schema: { type: string, enum: ["1s", "1min"], default: "1min" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device, interval, from, to, columns, rows]
+                properties:
+                  device: { type: string }
+                  interval: { type: string, enum: ["1s", "1min"] }
+                  from: { type: string, format: date-time, example: "2026-11-16T08:00:00" }
+                  to: { type: string, format: date-time, example: "2026-11-16T09:00:00" }
+                  columns:
+                    type: array
+                    items: { type: string }
+                    description: |
+                      ชื่อคอลัมน์ตาม `schema.TABLES` (ไม่มี device_id/date)
+                      1min: minute_local, minute_utc, n_rows, db_spl_mean, db_spl_max, db_spl_min, dba_mean,
+                      temp_c_mean, humidity_pct_mean, lux_mean, lat, lon, cell_id
+                      1s: device_type, session, record_id, ts_local, ts_utc, db_spl, dba, lux, temp_c,
+                      humidity_pct, lat, lon, alt_m, speed_kmh, satellites, hdop
+                    example: [minute_local, n_rows, db_spl_mean]
+                  rows:
+                    type: array
+                    description: แต่ละแถวเรียงตาม `columns` เรียงตามเวลา ค่าที่ไม่มี = null
+                    items:
+                      type: array
+                      items:
+                        nullable: true
+                        oneOf: [{ type: string }, { type: number }]
+                    example: [["2026-11-16T08:00:00", 60, 61.5]]
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/Upstream" }
+        "504": { $ref: "#/components/responses/Timeout" }
+
+  /quality:
+    get:
+      summary: คุณภาพข้อมูลรายชั่วโมง (loss_rate, แถวเสีย)
+      description: รวมทุก session ในชั่วโมงเดียวกัน ช่วงไม่เกิน 31 วัน ได้เฉพาะชั่วโมงที่ publish แล้ว
+      operationId: getQuality
+      parameters:
+        - $ref: "#/components/parameters/device"
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device, from, to, hours]
+                properties:
+                  device: { type: string }
+                  from: { type: string, format: date-time }
+                  to: { type: string, format: date-time }
+                  hours:
+                    type: array
+                    items: { $ref: "#/components/schemas/QualityHour" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/Upstream" }
+        "504": { $ref: "#/components/responses/Timeout" }
+
+components:
+  parameters:
+    device:
+      name: device
+      in: query
+      required: true
+      description: device_id ที่อยู่ใน devices.csv
+      schema: { type: string, example: IOTW-A001 }
+    from:
+      name: from
+      in: query
+      required: true
+      description: เริ่ม (รวม) ISO 8601 ไม่มี offset = เวลาไทย
+      schema: { type: string, example: "2026-11-16T08:00:00" }
+    to:
+      name: to
+      in: query
+      required: true
+      description: สิ้นสุด (ไม่รวม) ISO 8601 ไม่มี offset = เวลาไทย
+      schema: { type: string, example: "2026-11-17T08:00:00" }
+
+  responses:
+    BadRequest:
+      description: พารามิเตอร์ผิด หรือช่วงเวลาเกินกำหนด
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: ไม่รู้จักเครื่อง หรือยังไม่มีข้อมูลที่ publish
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Upstream:
+      description: Athena / S3 ผิดพลาด
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Timeout:
+      description: Athena ใช้เวลาเกิน 25 วินาที
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string, example: "range too long: max 6 hours" }
+
+    Device:
+      type: object
+      properties:
+        device_id: { type: string, example: IOTW-A001 }
+        device_type: { type: string, enum: [Mobile, Stationary] }
+        site_name: { type: string, nullable: true }
+        fixed_lat: { type: number, nullable: true }
+        fixed_lon: { type: number, nullable: true }
+        latest_batch_id: { type: string, nullable: true, example: "IOTW-A001__2026-11-16__08" }
+        latest_hour_local:
+          type: string
+          nullable: true
+          description: ต้นชั่วโมงล่าสุดที่ publish (เวลาไทย)
+          example: "2026-11-16T08:00:00"
+        published_at:
+          type: string
+          nullable: true
+          description: เวลาที่ VerifyBatch publish (UTC มี offset)
+          example: "2026-11-16T02:05:31+00:00"
+
+    Reading1min:
+      type: object
+      properties:
+        minute_local: { type: string, example: "2026-11-16T08:59:00" }
+        minute_utc: { type: string }
+        n_rows: { type: integer }
+        db_spl_mean: { type: number, nullable: true }
+        db_spl_max: { type: number, nullable: true }
+        db_spl_min: { type: number, nullable: true }
+        dba_mean: { type: number, nullable: true }
+        temp_c_mean: { type: number, nullable: true }
+        humidity_pct_mean: { type: number, nullable: true }
+        lux_mean: { type: number, nullable: true }
+        lat: { type: number, nullable: true }
+        lon: { type: number, nullable: true }
+        cell_id: { type: string, nullable: true }
+
+    QualityHour:
+      type: object
+      properties:
+        batch_id: { type: string, example: "IOTW-A001__2026-11-16__08" }
+        hour_local: { type: string, example: "2026-11-16T08:00:00" }
+        sessions: { type: integer }
+        expected_rows: { type: integer }
+        received_rows: { type: integer }
+        missing_rows: { type: integer }
+        duplicate_rows: { type: integer }
+        invalid_rows: { type: integer }
+        dropped_rows: { type: integer, description: duplicate_rows + invalid_rows }
+        loss_rate: { type: number, description: missing_rows / expected_rows (0 ถ้า expected = 0) }

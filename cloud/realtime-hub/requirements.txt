@@ -1,0 +1,2 @@
+# EC2 (Amazon Linux 2023 = Python 3.9): websockets 14-15 still support 3.9
+websockets>=14,<16

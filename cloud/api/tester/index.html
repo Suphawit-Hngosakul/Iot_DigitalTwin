@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IoT Walking API tester (#18)</title>
+<!-- หน้าทดสอบ API #18 สำหรับนักพัฒนาเท่านั้น ไม่ใช่เว็บจริง (#35) เปิดไฟล์นี้ในเบราว์เซอร์ได้เลย -->
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+<style>
+  :root { --bg:#f6f7f9; --panel:#fff; --line:#dde1e6; --text:#1f2933; --muted:#66727f;
+          --accent:#2563eb; --ok:#15803d; --warn:#b45309; --err:#b91c1c; }
+  * { box-sizing: border-box; }
+  [hidden] { display:none !important; }
+  body { margin:0; font:14px/1.45 system-ui, "Segoe UI", "Noto Sans Thai", sans-serif;
+         color:var(--text); background:var(--bg); }
+  header { display:flex; gap:12px; align-items:center; padding:10px 16px;
+           background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0 12px 0 0; }
+  input, select, button { font:inherit; padding:5px 8px; border:1px solid var(--line);
+                          border-radius:6px; background:#fff; color:var(--text); }
+  button { cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button:disabled { opacity:.5; cursor:default; }
+  #apiUrl { width:380px; }
+  label.inline { display:flex; gap:6px; align-items:center; color:var(--muted); }
+  main { display:grid; grid-template-columns: 360px 1fr; gap:12px; padding:12px;
+         height: calc(100vh - 58px); }
+  aside { overflow:auto; display:flex; flex-direction:column; gap:12px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .card h2 { font-size:14px; margin:0 0 8px; }
+  .row { display:flex; gap:8px; align-items:center; margin:6px 0; flex-wrap:wrap; }
+  .row > label { width:64px; color:var(--muted); }
+  .row input[type=datetime-local] { flex:1; }
+  .muted { color:var(--muted); }
+  .grid2 { display:grid; grid-template-columns: auto 1fr; gap:2px 10px; }
+  .grid2 div:nth-child(odd) { color:var(--muted); }
+  section.right { display:grid; grid-template-rows: 1fr 220px; gap:12px; min-height:0; }
+  #map { border-radius:8px; border:1px solid var(--line); min-height:300px; }
+  #chart { background:var(--panel); border:1px solid var(--line); border-radius:8px; }
+  .legend { position:absolute; bottom:28px; left:10px; background:#fffe; padding:6px 8px;
+            border-radius:6px; font-size:12px; box-shadow:0 1px 3px #0002; }
+  .legend .bar { width:180px; height:10px; border-radius:3px; margin:4px 0 2px; }
+  .legend .ends { display:flex; justify-content:space-between; }
+  .maplibregl-popup-content { font-size:12px; }
+  #log { font:12px/1.4 ui-monospace, Consolas, monospace; }
+  #log details { border-top:1px solid var(--line); padding:4px 0; }
+  #log summary { cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #log pre { max-height:240px; overflow:auto; background:#f3f4f6; padding:6px; margin:4px 0 0;
+             border-radius:4px; white-space:pre-wrap; word-break:break-all; }
+  .s2 { color:var(--ok); font-weight:600; } .s4 { color:var(--warn); font-weight:600; }
+  .s5, .s0 { color:var(--err); font-weight:600; }
+  table { border-collapse:collapse; width:100%; font-size:12px; }
+  th, td { border-bottom:1px solid var(--line); padding:3px 4px; text-align:right; }
+  th:first-child, td:first-child { text-align:left; }
+  .badge { display:inline-block; padding:1px 6px; border-radius:10px; background:#eef2ff;
+           color:#3730a3; font-size:12px; }
+  .badge.demo { background:#fef3c7; color:#92400e; }
+  .checks button { margin:2px 0; width:100%; text-align:left; }
+  #mapWrap { position:relative; min-height:0; }
+  #mapWrap #map { position:absolute; inset:0; }
+  .tabs { display:flex; gap:4px; margin-right:8px; }
+  .tabs button { border-radius:6px; }
+  .tabs button.active { background:var(--text); color:#fff; border-color:var(--text); }
+  /* dashboard */
+  .dash { padding:12px; display:flex; flex-direction:column; gap:12px; }
+  .dash-filters { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+                  background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 12px; }
+  .tiles { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:12px; }
+  .tile { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .tile .k { color:var(--muted); font-size:12px; }
+  .tile .v { font-size:26px; font-weight:600; line-height:1.2; font-variant-numeric: tabular-nums; }
+  .tile .v small { font-size:13px; font-weight:400; color:var(--muted); margin-left:2px; }
+  .tile .sub { color:var(--muted); font-size:12px; }
+  .status { display:inline-flex; gap:4px; align-items:center; font-size:12px; font-weight:600; }
+  .status.good { color:#15803d; } .status.warn { color:#b45309; } .status.bad { color:#b91c1c; }
+  .dash-grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+  .dash-grid .card { padding:10px 12px; }
+  .dash-grid .card h2 { margin-bottom:2px; }
+  .dash-grid .card .note { color:var(--muted); font-size:12px; margin-bottom:4px; }
+  .dchart { height:240px; }
+  #dMapWrap { position:relative; height:240px; }
+  #dMap { position:absolute; inset:0; border-radius:6px; }
+  @media (max-width: 1000px) { .dash-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>IoT Walking API tester</h1>
+  <div class="tabs"><button id="tabTester" class="active">ทดสอบ API</button><button id="tabDash">Dashboard</button></div>
+  <label class="inline">API URL
+    <input id="apiUrl" placeholder="https://xxxx.execute-api.us-east-1.amazonaws.com">
+  </label>
+  <label class="inline"><input type="checkbox" id="demo"> ข้อมูลตัวอย่าง (ไม่เรียก AWS)</label>
+  <button class="primary" id="btnConnect">โหลด /devices</button>
+  <label class="inline">แผนที่ฐาน <select id="baseMap"><option value="osm">ถนน (OSM)</option><option value="sat">ดาวเทียม (Esri)</option></select></label>
+  <span id="mode" class="badge"></span>
+</header>
+
+<main id="pageTester">
+  <aside>
+    <div class="card">
+      <h2>เครื่อง</h2>
+      <div class="row"><label>device</label><select id="device"></select></div>
+      <div id="deviceInfo" class="grid2 muted"></div>
+      <div class="row"><button id="btnLatest">/latest</button></div>
+      <div id="latestInfo" class="grid2"></div>
+    </div>
+
+    <div class="card">
+      <h2>/readings</h2>
+      <div class="row"><label>from</label><input type="datetime-local" id="from" step="1"></div>
+      <div class="row"><label>to</label><input type="datetime-local" id="to" step="1"></div>
+      <div class="row"><label>interval</label>
+        <select id="interval"><option>1min</option><option>1s</option></select>
+        <button id="btnDay">ทั้งวันล่าสุด</button>
+        <button id="btnHour">ชั่วโมงล่าสุด</button>
+      </div>
+      <div class="row"><label>สีตาม</label><select id="colorVar"></select></div>
+      <div class="row"><button class="primary" id="btnReadings">ดึง /readings</button>
+        <button id="btnQuality">ดึง /quality</button></div>
+      <div id="readingsInfo" class="muted"></div>
+    </div>
+
+    <div class="card">
+      <h2>/quality</h2>
+      <div id="qualityTable" class="muted">ยังไม่ได้ดึง</div>
+    </div>
+
+    <div class="card checks">
+      <h2>เช็คเกณฑ์ (spec 40 §5)</h2>
+      <button id="chkCache">/readings 1min 1 วัน ×2 (≤ 3 s, หลัง cache ≤ 0.5 s)</button>
+      <button id="chk1s">interval=1s ช่วง 7 ชม. → ต้องได้ 400</button>
+      <button id="chk1min">interval=1min ช่วง 32 วัน → ต้องได้ 400</button>
+      <button id="chkDev">device ที่ไม่มีอยู่ → ต้องได้ 404</button>
+      <button id="chkOrder">to ก่อน from → ต้องได้ 400</button>
+      <div id="checkResult" class="grid2" style="margin-top:6px"></div>
+    </div>
+
+    <div class="card">
+      <h2>Request log <button id="btnClear" style="float:right;padding:0 6px">ล้าง</button></h2>
+      <div id="log"></div>
+    </div>
+  </aside>
+
+  <section class="right">
+    <div id="mapWrap"><div id="map"></div><div class="legend" id="legend" hidden></div></div>
+    <div id="chart"></div>
+  </section>
+</main>
+
+<div id="pageDash" class="dash" hidden>
+  <div class="dash-filters">
+    <label class="inline">เครื่อง <select id="dDevice"></select></label>
+    <label class="inline">วันที่ <input type="date" id="dDate"></label>
+    <button id="dToday">วันล่าสุดที่มีข้อมูล</button>
+    <button class="primary" id="dRefresh">รีเฟรช</button>
+    <label class="inline"><input type="checkbox" id="dAuto"> รีเฟรชเองทุก 5 นาที</label>
+    <span id="dStatus" class="muted"></span>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">เสียง dB(SPL) ล่าสุด</div><div class="v" id="tSpl">–</div><div class="sub" id="tSplSub"></div></div>
+    <div class="tile"><div class="k">อุณหภูมิล่าสุด</div><div class="v" id="tTemp">–</div><div class="sub" id="tTempSub"></div></div>
+    <div class="tile"><div class="k">ความชื้นล่าสุด</div><div class="v" id="tHum">–</div><div class="sub" id="tHumSub"></div></div>
+    <div class="tile"><div class="k">แสงล่าสุด</div><div class="v" id="tLux">–</div><div class="sub" id="tLuxSub"></div></div>
+    <div class="tile"><div class="k">ข้อมูลของวันนั้น</div><div class="v" id="tCover">–</div><div class="sub" id="tCoverSub"></div></div>
+    <div class="tile"><div class="k">ข้อมูลหาย (loss)</div><div class="v" id="tLoss">–</div><div class="sub" id="tLossSub"></div></div>
+  </div>
+
+  <div class="dash-grid">
+    <div class="card"><h2>ตำแหน่งที่วัด (สีตาม dB(SPL) เฉลี่ยต่อนาที)</h2>
+      <div class="note" id="dMapNote"></div><div id="dMapWrap"><div id="dMap"></div><div class="legend" id="dLegend" hidden></div></div></div>
+    <div class="card"><h2>เสียง dB(SPL) ต่อนาที</h2><div class="note">เส้น = ค่าเฉลี่ย, แถบจาง = ต่ำสุดถึงสูงสุดในนาทีนั้น</div><div class="dchart" id="cSpl"></div></div>
+    <div class="card"><h2>อุณหภูมิ (°C)</h2><div class="note">เฉลี่ยต่อนาที</div><div class="dchart" id="cTemp"></div></div>
+    <div class="card"><h2>ความชื้น (%)</h2><div class="note">เฉลี่ยต่อนาที</div><div class="dchart" id="cHum"></div></div>
+    <div class="card"><h2>แสง (lux)</h2><div class="note">เฉลี่ยต่อนาที</div><div class="dchart" id="cLux"></div></div>
+    <div class="card"><h2>ข้อมูลหายต่อชั่วโมง (%)</h2><div class="note">missing ÷ expected จาก /quality, ชี้ที่แท่งเพื่อดูจำนวนแถว</div><div class="dchart" id="cLoss"></div></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const LAKSI = [100.579, 13.887];          // เขตหลักสี่ (D17)
+
+// ---------------------------------------------------------------- state ---
+const state = { devices: [], table: null, highlight: null };
+
+const VARS = {
+  "1min": [["db_spl_mean","dB(SPL) เฉลี่ย","dB"],["db_spl_max","dB(SPL) สูงสุด","dB"],
+           ["dba_mean","dBA เฉลี่ย","dB"],["temp_c_mean","อุณหภูมิ","°C"],
+           ["humidity_pct_mean","ความชื้น","%"],["lux_mean","แสง","lux"],["n_rows","จำนวนแถว/นาที",""]],
+  "1s":   [["db_spl","dB(SPL)","dB"],["dba","dBA","dB"],["temp_c","อุณหภูมิ","°C"],
+           ["humidity_pct","ความชื้น","%"],["lux","แสง","lux"],["speed_kmh","ความเร็ว","km/h"],
+           ["hdop","HDOP",""]],
+};
+const TIME_COL = { "1min": "minute_local", "1s": "ts_local" };
+// a longer gap than this between rows = stopped walking -> break the line
+const GAP_MS = { "1min": 5 * 60e3, "1s": 30e3 };
+const tms = (s) => Date.parse(s + "Z");
+
+// ------------------------------------------------------------ settings ---
+$("apiUrl").value = localStorage.getItem("iotApiUrl") || "";
+$("demo").checked = localStorage.getItem("iotApiDemo") === "1" || !$("apiUrl").value;
+function saveSettings() {
+  localStorage.setItem("iotApiUrl", $("apiUrl").value.trim());
+  localStorage.setItem("iotApiDemo", $("demo").checked ? "1" : "0");
+  $("mode").textContent = $("demo").checked ? "โหมดข้อมูลตัวอย่าง" : "เรียก API จริง";
+  $("mode").className = "badge" + ($("demo").checked ? " demo" : "");
+}
+saveSettings();
+
+// ---------------------------------------------------------------- fetch ---
+async function api(path, params = {}) {
+  const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== "" && v != null));
+  const query = qs.toString() ? "?" + qs : "";
+  const demo = $("demo").checked;
+  const base = $("apiUrl").value.trim().replace(/\/+$/, "");
+  if (!demo && !base) {
+    const body = { error: "ใส่ API URL ก่อน (terraform output api_url) หรือติ๊กข้อมูลตัวอย่าง" };
+    logRequest(path + query, 0, 0, JSON.stringify(body));
+    return { status: 0, body, ms: 0 };
+  }
+  const url = (demo ? "demo:" : base) + path + query;
+  const t0 = performance.now();
+  let status = 0, body = null, text = "";
+  try {
+    if (demo) {
+      await new Promise((r) => setTimeout(r, 150 + Math.random() * 250));
+      [status, body] = Demo.handle(path, Object.fromEntries(qs));
+      text = JSON.stringify(body);
+    } else {
+      const r = await fetch(url);
+      status = r.status;
+      text = await r.text();
+      try { body = JSON.parse(text); } catch { body = text; }
+    }
+  } catch (e) {
+    body = { error: String(e) + " (เช็ค URL / CORS / เน็ต)" };
+    text = JSON.stringify(body);
+  }
+  const ms = performance.now() - t0;
+  logRequest(url, status, ms, text);
+  return { status, body, ms };
+}
+
+function logRequest(url, status, ms, text) {
+  const d = document.createElement("details");
+  const cls = "s" + String(status)[0];
+  const size = text.length > 1024 ? (text.length / 1024).toFixed(1) + " KB" : text.length + " B";
+  d.innerHTML = `<summary><span class="${cls}">${status || "ERR"}</span> ${ms.toFixed(0)} ms · ${size} · ${escapeHtml(url)}</summary><pre></pre>`;
+  let pretty = text;
+  try { pretty = JSON.stringify(JSON.parse(text), null, 1); } catch {}
+  d.querySelector("pre").textContent = pretty.length > 20000 ? pretty.slice(0, 20000) + "\n… (ตัดเหลือ 20,000 ตัวอักษร)" : pretty;
+  $("log").prepend(d);
+}
+$("btnClear").onclick = () => { $("log").innerHTML = ""; };
+
+function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
+function fmt(v, d = 1) { return v == null ? "–" : typeof v === "number" ? (Number.isInteger(v) ? v : v.toFixed(d)) : v; }
+function errMsg(res) { return `${res.status}: ${res.body && res.body.error || JSON.stringify(res.body)}`; }
+
+// --------------------------------------------------------- time helpers ---
+const pad = (n) => String(n).padStart(2, "0");
+function toLocalInput(d) {   // Date (treated as Thai wall clock in UTC fields) -> input value
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+function parseLocal(s) { return new Date(s.length === 16 ? s + ":00Z" : s + "Z"); }
+function inputVal(id) { const v = $(id).value; return v && v.length === 16 ? v + ":00" : v; }
+
+// ------------------------------------------------------------------ map ---
+// Base maps that need no API key (CARTO now asks for one). OSM tiles are for light
+// developer use only (tile usage policy); the real web (#35) should pick its own provider.
+const BASE_STYLE = () => ({
+  version: 8,
+  sources: {
+    osm: { type: "raster", tileSize: 256, maxzoom: 19,
+           tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+           attribution: "© OpenStreetMap contributors" },
+    sat: { type: "raster", tileSize: 256, maxzoom: 19,
+           tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+           attribution: "Imagery © Esri, Maxar, Earthstar Geographics" },
+  },
+  layers: [
+    { id: "base-osm", type: "raster", source: "osm", paint: { "raster-saturation": -0.6, "raster-opacity": 0.85 } },
+    { id: "base-sat", type: "raster", source: "sat", layout: { visibility: "none" } },
+  ],
+});
+function setBase(m, kind) {
+  if (!m || !m.getLayer("base-osm")) return;
+  m.setLayoutProperty("base-osm", "visibility", kind === "osm" ? "visible" : "none");
+  m.setLayoutProperty("base-sat", "visibility", kind === "sat" ? "visible" : "none");
+}
+const map = new maplibregl.Map({
+  container: "map",
+  style: BASE_STYLE(),
+  center: LAKSI, zoom: 13,
+});
+map.addControl(new maplibregl.NavigationControl(), "top-right");
+map.addControl(new maplibregl.ScaleControl(), "bottom-right");
+const mapReady = new Promise((r) => map.on("load", r));
+const latestMarker = new maplibregl.Marker({ color: "#2563eb" });
+const hoverMarker = new maplibregl.Marker({ color: "#111827", scale: 0.6 });
+const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
+
+mapReady.then(() => {
+  map.addSource("track", { type: "geojson", data: emptyFC() });
+  map.addSource("points", { type: "geojson", data: emptyFC() });
+  map.addLayer({ id: "track", type: "line", source: "track",
+    paint: { "line-color": "#64748b", "line-width": 2, "line-opacity": 0.5 } });
+  map.addLayer({ id: "points", type: "circle", source: "points",
+    paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 3, 17, 7],
+             "circle-color": "#94a3b8", "circle-stroke-color": "#fff", "circle-stroke-width": 0.5 } });
+  map.on("mousemove", "points", (e) => {
+    map.getCanvas().style.cursor = "pointer";
+    const p = e.features[0].properties;
+    popup.setLngLat(e.lngLat).setHTML(popupHtml(JSON.parse(p.row))).addTo(map);
+    highlightChart(p.i);
+  });
+  map.on("mouseleave", "points", () => { map.getCanvas().style.cursor = ""; popup.remove(); });
+});
+function emptyFC() { return { type: "FeatureCollection", features: [] }; }
+
+function popupHtml(row) {
+  return Object.entries(row).filter(([, v]) => v != null)
+    .map(([k, v]) => `<b>${k}</b> ${escapeHtml(fmt(v, 3))}`).join("<br>");
+}
+
+// colour ramp (low = blue/green, high = red) for noise/heat style values
+const RAMP = ["#2c7bb6", "#00a6ca", "#00ccbc", "#90eb9d", "#ffff8c", "#f9d057", "#f29e2e", "#e76818", "#d7191c"];
+
+function renderMap() {
+  const t = state.table; if (!t) return;
+  const v = $("colorVar").value;
+  const iLat = t.columns.indexOf("lat"), iLon = t.columns.indexOf("lon"), iV = t.columns.indexOf(v);
+  const iT = t.columns.indexOf(TIME_COL[t.interval]);
+  const feats = [], coords = [], segs = [];
+  let seg = [], prevT = null;
+  t.rows.forEach((r, i) => {
+    const lat = r[iLat], lon = r[iLon];
+    if (lat == null || lon == null) return;
+    const row = Object.fromEntries(t.columns.map((c, j) => [c, r[j]]));
+    feats.push({ type: "Feature", geometry: { type: "Point", coordinates: [lon, lat] },
+                 properties: { i, v: r[iV], row: JSON.stringify(row) } });
+    coords.push([lon, lat]);
+    const ts = tms(r[iT]);
+    if (prevT != null && ts - prevT > GAP_MS[t.interval]) { if (seg.length > 1) segs.push(seg); seg = []; }
+    seg.push([lon, lat]); prevT = ts;
+  });
+  if (seg.length > 1) segs.push(seg);
+  const vals = feats.map((f) => f.properties.v).filter((x) => x != null).sort((a, b) => a - b);
+  // 2nd–98th percentile so one spike does not wash out the colours
+  const lo = vals.length ? vals[Math.floor(vals.length * 0.02)] : 0;
+  const hi = vals.length ? vals[Math.min(vals.length - 1, Math.floor(vals.length * 0.98))] : 1;
+  const span = hi - lo || 1;
+  const stops = RAMP.flatMap((c, k) => [lo + span * k / (RAMP.length - 1), c]);
+  map.getSource("points").setData({ type: "FeatureCollection", features: feats });
+  map.getSource("track").setData({ type: "FeatureCollection", features: segs.length ?
+    [{ type: "Feature", geometry: { type: "MultiLineString", coordinates: segs }, properties: {} }] : [] });
+  map.setPaintProperty("points", "circle-color",
+    ["case", ["==", ["get", "v"], null], "#cbd5e1", ["interpolate", ["linear"], ["get", "v"], ...stops]]);
+  const meta = VARS[t.interval].find((x) => x[0] === v) || [v, v, ""];
+  $("legend").hidden = !vals.length;
+  $("legend").innerHTML = `<b>${meta[1]}</b> ${meta[2] ? "(" + meta[2] + ")" : ""}
+    <div class="bar" style="background:linear-gradient(90deg,${RAMP.join(",")})"></div>
+    <div class="ends"><span>${fmt(lo)}</span><span>${fmt(hi)}</span></div>`;
+  if (coords.length) {
+    const b = coords.reduce((bb, c) => bb.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
+    map.fitBounds(b, { padding: 40, maxZoom: 17, duration: 500 });
+  }
+  return { points: feats.length, noGps: t.rows.length - feats.length };
+}
+
+// ---------------------------------------------------------------- chart ---
+const chart = echarts.init($("chart"));
+window.addEventListener("resize", () => chart.resize());
+
+function renderChart() {
+  const t = state.table; if (!t) return;
+  const v = $("colorVar").value, tc = t.columns.indexOf(TIME_COL[t.interval]);
+  const iV = t.columns.indexOf(v);
+  const meta = VARS[t.interval].find((x) => x[0] === v) || [v, v, ""];
+  // null between rows with a gap so the line does not bridge time without data
+  const toRow = [], toChart = [];   // chart data index <-> row index
+  const withGaps = (col) => {
+    const out = [];
+    toRow.length = 0;
+    t.rows.forEach((r, k) => {
+      if (k && tms(r[tc]) - tms(t.rows[k - 1][tc]) > GAP_MS[t.interval]) {
+        out.push([t.rows[k - 1][tc], null]); toRow.push(null);
+      }
+      toChart[k] = out.length; toRow.push(k);
+      out.push([r[tc], r[col]]);
+    });
+    return out;
+  };
+  const series = [{ name: meta[1], type: "line", showSymbol: false, data: withGaps(iV) }];
+  state.toRow = toRow.slice(); state.toChart = toChart;
+  if (t.interval === "1min" && v === "db_spl_mean") {
+    const iMax = t.columns.indexOf("db_spl_max"), iMin = t.columns.indexOf("db_spl_min");
+    series.push({ name: "max", type: "line", showSymbol: false, lineStyle: { opacity: 0.35 },
+                  data: withGaps(iMax) });
+    series.push({ name: "min", type: "line", showSymbol: false, lineStyle: { opacity: 0.35 },
+                  data: withGaps(iMin) });
+  }
+  chart.setOption({
+    animation: false, grid: { left: 50, right: 20, top: 30, bottom: 50 },
+    legend: { top: 4 }, tooltip: { trigger: "axis" },
+    xAxis: { type: "time" }, yAxis: { type: "value", scale: true, name: meta[2] },
+    dataZoom: [{ type: "inside" }, { type: "slider", height: 16, bottom: 8 }],
+    series,
+  }, true);
+}
+
+chart.on("updateAxisPointer", (e) => {
+  const t = state.table; if (!t || e.dataIndex == null || !state.toRow) return;
+  const r = t.rows[state.toRow[e.dataIndex]]; if (!r) return;
+  const lat = r[t.columns.indexOf("lat")], lon = r[t.columns.indexOf("lon")];
+  if (lat != null && lon != null) hoverMarker.setLngLat([lon, lat]).addTo(map);
+});
+function highlightChart(i) {
+  if (state.toChart) chart.dispatchAction({ type: "showTip", seriesIndex: 0, dataIndex: state.toChart[i] });
+}
+
+// ------------------------------------------------------------- actions ---
+function fillVars(interval) {
+  const cur = $("colorVar").value;
+  $("colorVar").innerHTML = VARS[interval].map(([k, label]) => `<option value="${k}">${label} (${k})</option>`).join("");
+  if (VARS[interval].some(([k]) => k === cur)) $("colorVar").value = cur;
+}
+fillVars("1min");
+$("interval").onchange = () => fillVars($("interval").value);
+$("colorVar").onchange = () => { if (state.table) { renderMap(); renderChart(); } };
+
+$("apiUrl").onchange = saveSettings;
+$("demo").onchange = () => { saveSettings(); loadDevices(); };
+$("btnConnect").onclick = () => { saveSettings(); loadDevices(); };
+
+async function loadDevices() {
+  const res = await api("/devices");
+  if (res.status !== 200) { $("deviceInfo").textContent = errMsg(res); return; }
+  state.devices = res.body.devices;
+  $("device").innerHTML = state.devices.map((d) =>
+    `<option value="${d.device_id}">${d.device_id}${d.latest_batch_id ? "" : " (ยังไม่มีข้อมูล)"}</option>`).join("");
+  const withData = state.devices.find((d) => d.latest_batch_id);
+  if (withData) $("device").value = withData.device_id;
+  showDevice();
+  setRange("day");
+  Dash.reset();
+  if (!$("pageDash").hidden) Dash.show();
+}
+$("device").onchange = () => { showDevice(); setRange("day"); };
+
+function currentDevice() { return state.devices.find((d) => d.device_id === $("device").value); }
+
+function showDevice() {
+  const d = currentDevice(); if (!d) return;
+  $("deviceInfo").innerHTML = [
+    ["ประเภท", d.device_type], ["ชั่วโมงล่าสุด", d.latest_hour_local || "–"],
+    ["publish เมื่อ", d.published_at || "–"], ["batch", d.latest_batch_id || "–"],
+    ...(d.fixed_lat != null ? [["พิกัดตั้ง", `${d.fixed_lat}, ${d.fixed_lon}`]] : []),
+  ].map(([k, v]) => `<div>${k}</div><div>${escapeHtml(v)}</div>`).join("");
+  $("latestInfo").innerHTML = "";
+}
+
+function setRange(kind) {
+  const d = currentDevice();
+  const last = d && d.latest_hour_local ? parseLocal(d.latest_hour_local) : new Date(Date.now() + 7 * 3600e3);
+  let from, to;
+  if (kind === "day") {
+    from = new Date(Date.UTC(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate()));
+    to = new Date(from.getTime() + 86400e3);
+    $("interval").value = "1min";
+  } else {
+    from = new Date(Date.UTC(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate(), last.getUTCHours()));
+    to = new Date(from.getTime() + 3600e3);
+    $("interval").value = "1s";
+  }
+  fillVars($("interval").value);
+  $("from").value = toLocalInput(from);
+  $("to").value = toLocalInput(to);
+}
+$("btnDay").onclick = () => setRange("day");
+$("btnHour").onclick = () => setRange("hour");
+
+$("btnLatest").onclick = async () => {
+  const res = await api("/latest", { device: $("device").value });
+  if (res.status !== 200) { $("latestInfo").innerHTML = `<div class="s4">${escapeHtml(errMsg(res))}</div><div></div>`; return; }
+  const r = res.body.row;
+  $("latestInfo").innerHTML = Object.entries(r).map(([k, v]) => `<div class="muted">${k}</div><div>${escapeHtml(fmt(v, 2))}</div>`).join("");
+  if (r.lat != null && r.lon != null) {
+    await mapReady;
+    latestMarker.setLngLat([r.lon, r.lat]).setPopup(new maplibregl.Popup().setHTML(popupHtml(r))).addTo(map);
+    map.flyTo({ center: [r.lon, r.lat], zoom: 16 });
+  }
+};
+
+$("btnReadings").onclick = async () => {
+  const interval = $("interval").value;
+  $("readingsInfo").textContent = "กำลังดึง…";
+  const res = await api("/readings", { device: $("device").value, from: inputVal("from"), to: inputVal("to"), interval });
+  if (res.status !== 200) { $("readingsInfo").innerHTML = `<span class="s4">${escapeHtml(errMsg(res))}</span>`; return; }
+  state.table = { ...res.body, interval };
+  await mapReady;
+  const m = renderMap();
+  renderChart();
+  $("readingsInfo").textContent = `${res.body.rows.length} แถว · ${res.ms.toFixed(0)} ms · บนแผนที่ ${m.points} จุด` +
+    (m.noGps ? ` · ไม่มี GPS ${m.noGps} แถว` : "");
+};
+
+$("btnQuality").onclick = async () => {
+  const res = await api("/quality", { device: $("device").value, from: inputVal("from"), to: inputVal("to") });
+  if (res.status !== 200) { $("qualityTable").innerHTML = `<span class="s4">${escapeHtml(errMsg(res))}</span>`; return; }
+  const h = res.body.hours;
+  if (!h.length) { $("qualityTable").textContent = "ไม่มีชั่วโมงที่ publish ในช่วงนี้"; return; }
+  $("qualityTable").innerHTML = `<table><tr><th>ชั่วโมง</th><th>expected</th><th>received</th><th>missing</th><th>เสีย</th><th>loss</th></tr>` +
+    h.map((q) => `<tr><td>${q.hour_local.slice(5, 13).replace("T", " ")}:00</td><td>${q.expected_rows}</td><td>${q.received_rows}</td>
+      <td>${q.missing_rows}</td><td>${q.dropped_rows}</td>
+      <td class="${q.loss_rate > 0.05 ? "s4" : ""}">${(q.loss_rate * 100).toFixed(1)}%</td></tr>`).join("") + "</table>";
+};
+
+// --------------------------------------------------------------- checks ---
+function checkLine(name, ok, detail) {
+  $("checkResult").insertAdjacentHTML("afterbegin",
+    `<div class="${ok ? "s2" : "s5"}">${ok ? "ผ่าน" : "ไม่ผ่าน"}</div><div>${escapeHtml(name)} <span class="muted">${escapeHtml(detail)}</span></div>`);
+}
+function lastDay() {
+  const d = currentDevice();
+  const last = d && d.latest_hour_local ? parseLocal(d.latest_hour_local) : new Date();
+  const from = new Date(Date.UTC(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate()));
+  return [from, new Date(from.getTime() + 86400e3)];
+}
+$("chkCache").onclick = async () => {
+  const [f, t] = lastDay();
+  // unique "to" second so the first call is a cache miss
+  const to = new Date(t.getTime() - (Math.floor(Math.random() * 50) + 1) * 1000);
+  const p = { device: $("device").value, from: toLocalInput(f), to: toLocalInput(to), interval: "1min" };
+  const a = await api("/readings", p), b = await api("/readings", p);
+  checkLine("ครั้งแรก ≤ 3 s", a.status === 200 && a.ms <= 3000, `${a.status} · ${a.ms.toFixed(0)} ms`);
+  checkLine("ครั้งที่ 2 (cache) ≤ 0.5 s", b.status === 200 && b.ms <= 500, `${b.status} · ${b.ms.toFixed(0)} ms`);
+};
+async function expectStatus(name, path, params, want) {
+  const r = await api(path, params);
+  checkLine(name, r.status === want, `ได้ ${r.status}`);
+}
+$("chk1s").onclick = () => { const [f] = lastDay();
+  expectStatus("1s ช่วง 7 ชม. → 400", "/readings", { device: $("device").value, interval: "1s",
+    from: toLocalInput(f), to: toLocalInput(new Date(f.getTime() + 7 * 3600e3)) }, 400); };
+$("chk1min").onclick = () => { const [f] = lastDay();
+  expectStatus("1min ช่วง 32 วัน → 400", "/readings", { device: $("device").value, interval: "1min",
+    from: toLocalInput(f), to: toLocalInput(new Date(f.getTime() + 32 * 86400e3)) }, 400); };
+$("chkDev").onclick = () => expectStatus("device ไม่มีอยู่ → 404", "/readings",
+  { device: "IOTW-Z999", from: "2026-11-16T00:00:00", to: "2026-11-17T00:00:00" }, 404);
+$("chkOrder").onclick = () => { const [f, t] = lastDay();
+  expectStatus("to ก่อน from → 400", "/readings", { device: $("device").value, from: toLocalInput(t), to: toLocalInput(f) }, 400); };
+
+// ----------------------------------------------------------------- demo ---
+// Fake API with the same shapes and rules as cloud/api/handler.py, so the page
+// can be tried before deploy. Synthetic walk around Lak Si; not real data.
+const Demo = (() => {
+  const DEVICES = ["IOTW-A001", "IOTW-A002"];
+  const now = new Date(Date.now() + 7 * 3600e3);                 // Thai wall clock
+  const walking = (t) => { const h = new Date(t).getUTCHours(); return (h >= 7 && h < 11) || (h >= 16 && h < 20); };
+  // newest finished hour in which the demo device was walking
+  let lastHour = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours() - 1));
+  while (!walking(lastHour.getTime())) lastHour = new Date(lastHour.getTime() - 3600e3);
+  const iso = (d) => toLocalInput(d);
+  const seed = (s) => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return () => ((h = Math.imul(h ^ (h >>> 15), 2246822507), h ^= h >>> 13, (h >>> 0) / 4294967296)); };
+
+  function pos(t) {   // walking loop ~ 2.5 km around Lak Si, one loop / 40 min
+    const a = (t / 1000 / 2400) * 2 * Math.PI;
+    return [LAKSI[1] + 0.006 * Math.sin(a) + 0.0015 * Math.sin(3 * a), LAKSI[0] + 0.008 * Math.cos(a)];
+  }
+  function sample(dev, t) {
+    const r = seed(dev + Math.floor(t / 1000))();
+    const hour = new Date(t).getUTCHours() + new Date(t).getUTCMinutes() / 60;
+    const [lat, lon] = pos(t + (dev.endsWith("2") ? 900e3 : 0));
+    const road = Math.max(0, Math.cos((lon - LAKSI[0]) * 900));  // louder near "main road"
+    return { spl: 52 + 18 * road + 6 * Math.sin(hour / 24 * 2 * Math.PI - 1.5) + 8 * r,
+             temp: 27 + 6 * Math.sin((hour - 9) / 24 * 2 * Math.PI) + r,
+             hum: 70 - 15 * Math.sin((hour - 9) / 24 * 2 * Math.PI) + 3 * r,
+             lux: hour > 6 && hour < 18.5 ? 20000 * Math.sin((hour - 6) / 12.5 * Math.PI) * (0.6 + 0.4 * r) : 5 * r,
+             lat: r < 0.03 ? null : lat, lon: r < 0.03 ? null : lon, r };
+  }
+
+  function readings(dev, from, to, interval) {
+    const cols = interval === "1s"
+      ? ["device_type","session","record_id","ts_local","ts_utc","db_spl","dba","lux","temp_c","humidity_pct","lat","lon","alt_m","speed_kmh","satellites","hdop"]
+      : ["minute_local","minute_utc","n_rows","db_spl_mean","db_spl_max","db_spl_min","dba_mean","temp_c_mean","humidity_pct_mean","lux_mean","lat","lon","cell_id"];
+    const step = interval === "1s" ? 1000 : 60000, rows = [];
+    const end = Math.min(to.getTime(), lastHour.getTime() + 3600e3);
+    for (let t = Math.ceil(from.getTime() / step) * step; t < end; t += step) {
+      if (!walking(t)) continue;
+      const s = sample(dev, t), utc = iso(new Date(t - 7 * 3600e3));
+      const r2 = (x) => Math.round(x * 100) / 100;
+      if (interval === "1s") rows.push(["Mobile", 7, Math.floor(t / 1000) % 100000, iso(new Date(t)), utc,
+        r2(s.spl), r2(s.spl - 4), r2(s.lux), r2(s.temp), r2(s.hum), s.lat, s.lon, 8, r2(4 + s.r), 9, r2(0.9 + s.r)]);
+      else rows.push([iso(new Date(t)), utc, 60 - Math.floor(s.r * 3), r2(s.spl), r2(s.spl + 9), r2(s.spl - 7),
+        r2(s.spl - 4), r2(s.temp), r2(s.hum), r2(s.lux), s.lat, s.lon, null]);
+    }
+    return { columns: cols, rows };
+  }
+
+  function range(p, maxMs) {
+    if (!p.from || !p.to) return [400, { error: "from is required" }];
+    const f = parseLocal(p.from), t = parseLocal(p.to);
+    if (isNaN(f) || isNaN(t)) return [400, { error: "from is not an ISO time" }];
+    if (t <= f) return [400, { error: "to must be after from" }];
+    if (t - f > maxMs) return [400, { error: `range too long: max ${maxMs >= 86400e3 ? maxMs / 86400e3 + " days" : maxMs / 3600e3 + " hours"}` }];
+    return [f, t];
+  }
+
+  function handle(path, p) {
+    if (path === "/devices") return [200, { devices: DEVICES.map((d, i) => {
+      const h = i === 1 ? null : lastHour;
+      return { device_id: d, device_type: "Mobile", site_name: null, fixed_lat: null, fixed_lon: null,
+        latest_batch_id: h ? `${d}__${iso(h).slice(0, 10)}__${pad(h.getUTCHours())}` : null,
+        latest_hour_local: h ? iso(h) : null,
+        published_at: h ? new Date(h.getTime() - 7 * 3600e3 + 3900e3).toISOString().slice(0, 19) + "+00:00" : null };
+    }) }];
+    if (!p.device) return [400, { error: "device is required" }];
+    if (!DEVICES.includes(p.device)) return [404, { error: `unknown device: ${p.device}` }];
+    if (path === "/latest") {
+      if (p.device !== "IOTW-A001") return [404, { error: `no published data for ${p.device}` }];
+      const day = new Date(Date.UTC(lastHour.getUTCFullYear(), lastHour.getUTCMonth(), lastHour.getUTCDate()));
+      const t = readings(p.device, day, new Date(lastHour.getTime() + 3600e3), "1min");
+      const last = t.rows[t.rows.length - 1];
+      return last ? [200, { device: p.device, row: Object.fromEntries(t.columns.map((c, i) => [c, last[i]])) }]
+                  : [404, { error: `no published data for ${p.device}` }];
+    }
+    if (path === "/readings") {
+      const interval = p.interval || "1min";
+      if (!["1s", "1min"].includes(interval)) return [400, { error: "interval must be 1s or 1min" }];
+      const rg = range(p, interval === "1s" ? 6 * 3600e3 : 31 * 86400e3);
+      if (typeof rg[0] === "number") return rg;
+      const t = p.device === "IOTW-A001" ? readings(p.device, rg[0], rg[1], interval) : { columns: [], rows: [] };
+      return [200, { device: p.device, interval, from: iso(rg[0]), to: iso(rg[1]), ...t }];
+    }
+    if (path === "/quality") {
+      const rg = range(p, 31 * 86400e3);
+      if (typeof rg[0] === "number") return rg;
+      const hours = [];
+      if (p.device === "IOTW-A001")
+        for (let t = Math.floor(rg[0] / 3600e3) * 3600e3; t < Math.min(rg[1], lastHour.getTime() + 1); t += 3600e3) {
+          if (!walking(t)) continue;
+          const r = seed("q" + t)(), exp = 3600, miss = Math.floor(r * r * 400), dup = Math.floor(r * 4), inv = Math.floor(r * 9);
+          const h = new Date(t);
+          hours.push({ batch_id: `${p.device}__${iso(h).slice(0, 10)}__${pad(h.getUTCHours())}`, expected_rows: exp,
+            received_rows: exp - miss, missing_rows: miss, duplicate_rows: dup, invalid_rows: inv, sessions: 1,
+            hour_local: iso(h), dropped_rows: dup + inv, loss_rate: miss / exp });
+        }
+      return [200, { device: p.device, from: iso(rg[0]), to: iso(rg[1]), hours }];
+    }
+    return [404, { error: `no route ${path}` }];
+  }
+  return { handle };
+})();
+
+// ------------------------------------------------------------ dashboard ---
+const Dash = (() => {
+  const COLOR = "#2a78d6";                      // one series per chart -> slot 1
+  const charts = {};
+  let dmap = null, dmapReady = null, timer = null, loaded = false;
+
+  function initCharts() {
+    for (const id of ["cSpl", "cTemp", "cHum", "cLux", "cLoss"])
+      if (!charts[id]) charts[id] = echarts.init($(id));
+  }
+  function initMap() {
+    if (dmap) return;
+    dmap = new maplibregl.Map({ container: "dMap", style: BASE_STYLE(), center: LAKSI, zoom: 13 });
+    dmap.on("load", () => setBase(dmap, $("baseMap").value));
+    dmap.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    dmapReady = new Promise((r) => dmap.on("load", () => {
+      dmap.addSource("pts", { type: "geojson", data: emptyFC() });
+      dmap.addLayer({ id: "pts", type: "circle", source: "pts", paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 3, 17, 7],
+        "circle-color": "#94a3b8", "circle-stroke-color": "#fff", "circle-stroke-width": 0.5 } });
+      const pop = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
+      dmap.on("mousemove", "pts", (e) => {
+        const p = e.features[0].properties;
+        pop.setLngLat(e.lngLat).setHTML(`<b>${p.t.slice(11, 16)}</b><br>dB(SPL) ${fmt(p.v)}<br>อุณหภูมิ ${fmt(p.temp)} °C`).addTo(dmap);
+      });
+      dmap.on("mouseleave", "pts", () => pop.remove());
+      r();
+    }));
+  }
+
+  function show() {
+    initCharts(); initMap();
+    setTimeout(() => { Object.values(charts).forEach((c) => c.resize()); dmap.resize(); }, 0);
+    if (!loaded) { syncDevices(); latestDay(); refresh(); loaded = true; }
+  }
+
+  function syncDevices() {
+    const cur = $("dDevice").value || $("device").value;
+    $("dDevice").innerHTML = $("device").innerHTML;
+    if (cur) $("dDevice").value = cur;
+  }
+  function latestDay() {
+    const d = state.devices.find((x) => x.device_id === $("dDevice").value);
+    $("dDate").value = d && d.latest_hour_local ? d.latest_hour_local.slice(0, 10)
+                                                : toLocalInput(new Date(Date.now() + 7 * 3600e3)).slice(0, 10);
+  }
+
+  function ago(isoLocal) {
+    const now = Date.now() + 7 * 3600e3;          // Thai wall clock as UTC fields
+    const min = Math.round((now - tms(isoLocal)) / 60e3);
+    if (min < 1) return "เมื่อสักครู่";
+    if (min < 60) return `${min} นาทีที่แล้ว`;
+    if (min < 48 * 60) return `${Math.floor(min / 60)} ชม.ที่แล้ว`;
+    return `${Math.floor(min / 1440)} วันที่แล้ว`;
+  }
+  function tile(id, v, unit, sub, d = 1) {
+    const txt = v == null ? "" : d === 0 ? Math.round(v).toLocaleString() : fmt(v, d);
+    $(id).innerHTML = v == null ? "–" : `${txt}<small>${unit}</small>`;
+    $(id + "Sub").innerHTML = sub || "";
+  }
+  function status(kind, text) {
+    const icon = { good: "✓", warn: "!", bad: "✕" }[kind];
+    return `<span class="status ${kind}">${icon} ${text}</span>`;
+  }
+
+  async function refresh() {
+    const device = $("dDevice").value, day = $("dDate").value;
+    if (!device || !day) { $("dStatus").textContent = "กดโหลด /devices ก่อน"; return; }
+    $("dStatus").textContent = "กำลังโหลด…";
+    const from = day + "T00:00:00";
+    const to = toLocalInput(new Date(Date.parse(day + "T00:00:00Z") + 86400e3));
+    const [lat, rd, q] = await Promise.all([
+      api("/latest", { device }),
+      api("/readings", { device, from, to, interval: "1min" }),
+      api("/quality", { device, from, to }),
+    ]);
+
+    // tiles: latest
+    if (lat.status === 200) {
+      const r = lat.body.row, when = `${r.minute_local.slice(day === r.minute_local.slice(0, 10) ? 11 : 5, 16).replace("T", " ")} · ${ago(r.minute_local)}`;
+      tile("tSpl", r.db_spl_mean, " dB", `สูงสุด ${fmt(r.db_spl_max)} · ${when}`);
+      tile("tTemp", r.temp_c_mean, " °C", when);
+      tile("tHum", r.humidity_pct_mean, " %", when);
+      tile("tLux", r.lux_mean, " lux", r.lat != null ? `${when}` : `${when} · ไม่มี GPS`, 0);
+    } else for (const id of ["tSpl", "tTemp", "tHum", "tLux"]) tile(id, null, "", escapeHtml(errMsg(lat)));
+
+    // tiles: quality of the day
+    if (q.status === 200 && q.body.hours.length) {
+      const h = q.body.hours, sum = (k) => h.reduce((a, x) => a + (x[k] || 0), 0);
+      const exp = sum("expected_rows"), miss = sum("missing_rows"), rec = sum("received_rows");
+      const loss = exp ? miss / exp : 0;
+      $("tCover").innerHTML = `${h.length}<small> ชม.</small>`;
+      $("tCoverSub").textContent = `${rec.toLocaleString()} แถว · เสีย ${sum("dropped_rows").toLocaleString()} แถว`;
+      $("tLoss").innerHTML = `${(loss * 100).toFixed(1)}<small> %</small>`;
+      $("tLossSub").innerHTML = loss < 0.02 ? status("good", "ปกติ (< 2%)")
+                             : loss < 0.05 ? status("warn", "เริ่มหาย (2–5%)") : status("bad", "หายเยอะ (> 5%)");
+    } else {
+      $("tCover").innerHTML = "0<small> ชม.</small>"; $("tCoverSub").textContent = q.status === 200 ? "ยังไม่มีชั่วโมงที่ publish" : errMsg(q);
+      $("tLoss").textContent = "–"; $("tLossSub").textContent = "";
+    }
+
+    // charts
+    const t = rd.status === 200 ? rd.body : { columns: [], rows: [] };
+    const col = (n) => t.columns.indexOf(n);
+    const T = col("minute_local");
+    const series = (n) => {        // [time, value] with a null at gaps > 5 min
+      const out = [], i = col(n);
+      t.rows.forEach((r, k) => {
+        if (k && tms(r[T]) - tms(t.rows[k - 1][T]) > GAP_MS["1min"]) out.push([t.rows[k - 1][T], null]);
+        out.push([r[T], r[i]]);
+      });
+      return out;
+    };
+    const dayMin = day + "T00:00:00", dayMax = to;
+    const base = (unit, dec) => ({
+      animation: false, grid: { left: 44, right: 12, top: 10, bottom: 28 },
+      tooltip: { trigger: "axis", valueFormatter: (v) => v == null ? "–" : `${(+v).toFixed(dec)} ${unit}` },
+      xAxis: { type: "time", min: dayMin, max: dayMax, axisLabel: { color: "#66727f", formatter: "{HH}:{mm}" },
+               axisLine: { lineStyle: { color: "#dde1e6" } }, splitLine: { show: false } },
+      yAxis: { type: "value", scale: true, axisLabel: { color: "#66727f" }, splitLine: { lineStyle: { color: "#eef0f3" } } },
+    });
+    const line = (name, data) => ({ name, type: "line", data, showSymbol: false, lineStyle: { width: 2, color: COLOR },
+                                     itemStyle: { color: COLOR }, emphasis: { disabled: true } });
+    const empty = { graphic: t.rows.length ? [] : [{ type: "text", left: "center", top: "middle",
+                    style: { text: "ไม่มีข้อมูลในวันนี้", fill: "#66727f", fontSize: 13 } }] };
+
+    // SPL: min-max band (stacked area: min + (max-min)) + mean line
+    const mins = series("db_spl_min"), maxs = series("db_spl_max");
+    charts.cSpl.setOption({ ...base("dB", 1), ...empty, series: [
+      { name: "ต่ำสุด", type: "line", data: mins, stack: "band", showSymbol: false, lineStyle: { opacity: 0 }, silent: true },
+      { name: "ช่วง", type: "line", data: maxs.map((p, k) => [p[0], p[1] == null || mins[k][1] == null ? null : p[1] - mins[k][1]]),
+        stack: "band", showSymbol: false, lineStyle: { opacity: 0 }, areaStyle: { color: COLOR, opacity: 0.15 }, silent: true,
+        tooltip: { show: false } },
+      line("dB(SPL) เฉลี่ย", series("db_spl_mean")),
+    ], tooltip: { trigger: "axis", formatter: (ps) => {
+        const p = ps.find((x) => x.seriesName === "dB(SPL) เฉลี่ย"); if (!p) return "";
+        const k = p.dataIndex, mx = maxs[k] && maxs[k][1], mn = mins[k] && mins[k][1];
+        return `${String(p.value[0]).slice(11, 16)}<br>เฉลี่ย <b>${fmt(p.value[1])}</b> dB<br>ช่วง ${fmt(mn)}–${fmt(mx)} dB`;
+      } } }, true);
+    charts.cTemp.setOption({ ...base("°C", 1), ...empty, series: [line("อุณหภูมิ", series("temp_c_mean"))] }, true);
+    charts.cHum.setOption({ ...base("%", 1), ...empty, series: [line("ความชื้น", series("humidity_pct_mean"))] }, true);
+    charts.cLux.setOption({ ...base("lux", 0), ...empty, series: [line("แสง", series("lux_mean"))] }, true);
+
+    // loss per hour: bars on a 0-based axis, one per hour of the day
+    const hours = q.status === 200 ? q.body.hours : [];
+    const byHour = Object.fromEntries(hours.map((h) => [h.hour_local.slice(11, 13), h]));
+    const cats = Array.from({ length: 24 }, (_, i) => pad(i));
+    charts.cLoss.setOption({
+      animation: false, grid: { left: 44, right: 12, top: 10, bottom: 28 },
+      tooltip: { trigger: "item", formatter: (p) => { const h = byHour[p.name]; if (!h) return `${p.name}:00 ไม่มีข้อมูล`;
+        return `${p.name}:00–${p.name}:59<br>loss <b>${(h.loss_rate * 100).toFixed(1)}%</b><br>ได้ ${h.received_rows} / คาด ${h.expected_rows} แถว<br>หาย ${h.missing_rows} · เสีย ${h.dropped_rows} · ${h.sessions} session`; } },
+      xAxis: { type: "category", data: cats, axisLabel: { color: "#66727f", interval: 2 }, axisTick: { show: false },
+               axisLine: { lineStyle: { color: "#dde1e6" } } },
+      yAxis: { type: "value", min: 0, axisLabel: { color: "#66727f", formatter: "{value}%" }, splitLine: { lineStyle: { color: "#eef0f3" } } },
+      series: [{ type: "bar", barMaxWidth: 14, barMinHeight: 2, itemStyle: { color: COLOR, borderRadius: [4, 4, 0, 0] },
+                 data: cats.map((c) => byHour[c] ? +(byHour[c].loss_rate * 100).toFixed(2) : null) }],
+      graphic: hours.length ? [] : [{ type: "text", left: "center", top: "middle", style: { text: "ไม่มีข้อมูลในวันนี้", fill: "#66727f", fontSize: 13 } }],
+    }, true);
+
+    // map
+    await dmapReady;
+    const iLat = col("lat"), iLon = col("lon"), iV = col("db_spl_mean"), iTemp = col("temp_c_mean");
+    const feats = t.rows.filter((r) => r[iLat] != null && r[iLon] != null).map((r) => ({ type: "Feature",
+      geometry: { type: "Point", coordinates: [r[iLon], r[iLat]] }, properties: { v: r[iV], t: r[T], temp: r[iTemp] } }));
+    dmap.getSource("pts").setData({ type: "FeatureCollection", features: feats });
+    const vals = feats.map((f) => f.properties.v).filter((x) => x != null).sort((a, b) => a - b);
+    if (vals.length) {
+      const lo = vals[Math.floor(vals.length * 0.02)], hi = vals[Math.min(vals.length - 1, Math.floor(vals.length * 0.98))];
+      const span = hi - lo || 1;
+      dmap.setPaintProperty("pts", "circle-color", ["case", ["==", ["get", "v"], null], "#cbd5e1",
+        ["interpolate", ["linear"], ["get", "v"], ...RAMP.flatMap((c, k) => [lo + span * k / (RAMP.length - 1), c])]]);
+      $("dLegend").hidden = false;
+      $("dLegend").innerHTML = `<b>dB(SPL)</b><div class="bar" style="background:linear-gradient(90deg,${RAMP.join(",")})"></div>
+        <div class="ends"><span>${fmt(lo)}</span><span>${fmt(hi)}</span></div>`;
+      const b = feats.reduce((bb, f) => bb.extend(f.geometry.coordinates),
+        new maplibregl.LngLatBounds(feats[0].geometry.coordinates, feats[0].geometry.coordinates));
+      dmap.fitBounds(b, { padding: 30, maxZoom: 17, duration: 0 });
+    } else $("dLegend").hidden = true;
+    const noGps = t.rows.length - feats.length;
+    $("dMapNote").textContent = !t.rows.length ? "ไม่มีข้อมูลในวันนี้"
+      : `${feats.length} นาทีมีพิกัด` + (noGps ? ` · ${noGps} นาทีไม่มี GPS (ไม่แสดงบนแผนที่)` : "");
+
+    const bad = [lat, rd, q].filter((r) => r.status !== 200 && !(r === lat && r.status === 404));
+    $("dStatus").innerHTML = bad.length ? `<span class="s4">${escapeHtml(errMsg(bad[0]))}</span>`
+      : `อัปเดต ${new Date().toLocaleTimeString("th-TH")} · ${t.rows.length} นาที`;
+  }
+
+  $("dRefresh").onclick = refresh;
+  $("dToday").onclick = () => { latestDay(); refresh(); };
+  $("dDevice").onchange = () => { latestDay(); refresh(); };
+  $("dDate").onchange = refresh;
+  $("dAuto").onchange = () => {
+    clearInterval(timer);
+    if ($("dAuto").checked) timer = setInterval(refresh, 5 * 60e3);
+  };
+  window.addEventListener("resize", () => Object.values(charts).forEach((c) => c.resize()));
+  return { show, reset: () => { loaded = false; }, setBase: (k) => setBase(dmap, k) };
+})();
+
+function showTab(which) {
+  const dash = which === "dash";
+  $("pageTester").hidden = dash; $("pageDash").hidden = !dash;
+  $("tabTester").classList.toggle("active", !dash); $("tabDash").classList.toggle("active", dash);
+  if (dash) Dash.show(); else { map.resize(); chart.resize(); }
+}
+$("tabTester").onclick = () => showTab("tester");
+$("tabDash").onclick = () => showTab("dash");
+
+$("baseMap").value = localStorage.getItem("iotBaseMap") || "osm";
+$("baseMap").onchange = () => {
+  localStorage.setItem("iotBaseMap", $("baseMap").value);
+  setBase(map, $("baseMap").value);
+  try { Dash.setBase($("baseMap").value); } catch {}
+};
+map.on("load", () => setBase(map, $("baseMap").value));
+
+loadDevices();
+</script>
+</body>
+</html>

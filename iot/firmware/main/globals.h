@@ -85,6 +85,7 @@ extern SemaphoreHandle_t sdMutex;
 extern SemaphoreHandle_t wireMutex;   // I2C bus: RTC + OLED + BH1750
 
 
+
 // =============================================================================
 //  Sensor State  (written by each sensor task under its own mutex)
 // =============================================================================
@@ -125,6 +126,27 @@ extern bool rtcAvailable;
 extern volatile bool     netConnected;
 extern volatile int8_t   netRssi;        // dBm, 0 while disconnected
 extern volatile uint32_t netReconnects;  // successful reconnects since boot
+
+
+// =============================================================================
+//  CSV Upload Status  (single writer: uploadTask, issue #7)
+// =============================================================================
+
+extern volatile uint32_t uploadBacklogRows;   // rows on SD not sent yet (estimate)
+extern volatile uint32_t uploadChunksOk;      // chunks answered 200 since boot
+extern volatile uint32_t uploadRowsSkipped;   // rows given up on (see /upload_skipped.csv)
+extern volatile int16_t  uploadLastCode;      // last HTTP status (<0 = HTTPClient error)
+extern volatile bool     uploadStopped;       // 401 / bad URL: stopped until reboot
+
+
+// =============================================================================
+//  Realtime Status  (single writer: rtTask, issue #6)
+// =============================================================================
+
+extern volatile bool     rtConnected;    // WebSocket to the hub is open
+extern volatile uint32_t rtSent;         // readings sent since boot
+extern volatile uint32_t rtReconnects;   // reconnects after the first connect
+extern volatile bool     rtStopped;      // 401 / wss:// / bad URL: stopped until reboot
 
 
 // =============================================================================

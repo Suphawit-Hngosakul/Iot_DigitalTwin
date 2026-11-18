@@ -175,11 +175,11 @@ static void handleRoot() {
 
   b += F("<fieldset><legend>เซิร์ฟเวอร์</legend>");
   addField(b, "Ingest URL (อัป CSV)", "ingest", htmlEscape(s.ingestUrl),
-           "https://... (เว้นว่าง = ยังไม่ส่ง)", "url", "maxlength=\"128\"");
+           "http://<relay>:8080/ingest (เว้นว่าง = ยังไม่ส่ง)", "url", "maxlength=\"128\"");
   addField(b, "Presign URL (อัป WAV)", "presign", htmlEscape(s.presignUrl),
            "https://... (เว้นว่าง = ยังไม่ส่ง)", "url", "maxlength=\"128\"");
-  addField(b, "Realtime WSS URL", "wss", htmlEscape(s.wssUrl),
-           "wss://.../device (เว้นว่าง = ยังไม่ส่ง)", "text", "maxlength=\"128\"");
+  addField(b, "Realtime URL (hub)", "wss", htmlEscape(s.wssUrl),
+           "ws://<relay>:8081/device (เว้นว่าง = ยังไม่ส่ง)", "text", "maxlength=\"128\"");
   b += F("<small>Token ของเครื่องตั้งใน secrets.h (DEVICE_TOKEN) เท่านั้น ");
   b += DEVICE_TOKEN[0] ? F("- ตั้งแล้ว") : F("- <b>ยังไม่ได้ตั้ง</b>");
   b += F("</small></fieldset>");
@@ -311,7 +311,7 @@ static void argUrl(const char *name, bool websocket, char *dst, String &err) {
   v.trim();
   if (!settingsUrlValid(v.c_str(), websocket)) {
     err += name;
-    err += websocket ? F(" ต้องขึ้นต้นด้วย wss:// หรือ ws://")
+    err += websocket ? F(" ต้องขึ้นต้นด้วย ws:// (wss:// ใช้ได้เฉพาะบอร์ดที่มี PSRAM)")
                      : F(" ต้องขึ้นต้นด้วย https:// หรือ http://");
     err += F(" ไม่มีช่องว่าง และยาวไม่เกิน 128 ตัว (หรือเว้นว่าง)<br>");
     return;

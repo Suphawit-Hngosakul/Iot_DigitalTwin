@@ -7,6 +7,23 @@ device_token_hashes = {
   "<sha256-of-token-walk-02>" = "IOTW-A002"
 }
 
-# (Optional) ตั้งค่า GEE เพิ่มเติมถ้าต้องการ override ค่าเริ่มต้น
-# gee_project = "turnkey-tribute-511903-t6"
-# gee_assets  = "projects/turnkey-tribute-511903-t6/assets/laksi_boundary"
+# EC2 relay ให้บอร์ดส่ง HTTP (บอร์ดไม่มี RAM ทำ TLS) ปิด = false
+relay_enabled = true
+# realtime hub (ws:// :8081) บน EC2 ตัวเดียวกัน ใช้ device_token_hashes ชุดเดียวกับ ingest (D22)
+hub_enabled = true
+# เปิด port 22 ให้ EC2 Instance Connect ดู log ได้ (ว่าง = ปิด)
+# relay_ssh_cidrs = ["18.206.107.24/29"]
+
+# IoT pipeline (#11-#16)
+alert_email               = "you@example.com"   # กดยืนยันในอีเมลที่ SNS ส่งมาครั้งแรก
+pipeline_schedule_enabled = true                # false = รันมืออย่างเดียว
+# layer สำเร็จรูปของ AWS (มี pyarrow) เลขเวอร์ชันล่าสุดดูที่
+# https://aws-sdk-pandas.readthedocs.io/en/stable/install.html หัวข้อ AWS Lambda Layer
+pandas_layer_arn = "arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:<version>"
+
+# Glue + Athena (#17) ไม่ต้องใส่ก็ได้ ใช้ค่า default
+# catalog_date_start          = "2026-11-01"   # วันแรกที่ตารางมองเห็น (เวลาไทย) ยิ่งเก่า query ที่ไม่กรอง date ยิ่งช้า
+# athena_bytes_scanned_cutoff = 1073741824     # query สแกนเกิน 1 GiB ถูกยกเลิก
+
+# API ให้เว็บ (#18) ไม่ใส่ = เปิด CORS ทุกโดเมน ("*") ใส่โดเมนเว็บจริงเมื่อ #35 ขึ้นแล้ว
+# api_allowed_origins = ["http://<web-bucket>.s3-website-us-east-1.amazonaws.com"]

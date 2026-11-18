@@ -34,12 +34,53 @@ module "ingest" {
   common_dir          = "${path.root}/../pipeline/common"
 }
 
-module "satellite" {
-  source      = "./modules/satellite"
-  name_prefix = var.name_prefix
-  role_arn    = data.aws_iam_role.lab.arn
-  source_dir  = "${path.root}/../satellite/test_lambda"
-  layer_zip   = "${path.root}/../satellite/gee-layer.zip"
-  gee_project = var.gee_project
-  gee_assets  = var.gee_assets
+# Plain HTTP relay for boards without RAM for TLS (decision 2026-11-17),
+# plus the realtime hub on the same EC2 (ws:// :8081, D22, spec 22).
+module "relay" {
+  count               = var.relay_enabled ? 1 : 0
+  source              = "./modules/relay"
+  name_prefix         = var.name_prefix
+  upstream_url        = module.ingest.ingest_url
+  source_dir          = "${path.root}/../relay"
+  ssh_cidrs           = var.relay_ssh_cidrs
+  hub_enabled         = var.hub_enabled
+  hub_source_dir      = "${path.root}/../realtime-hub"
+  device_token_hashes = var.device_token_hashes
+}
+
+# IoT hourly pipeline (spec 30, #11-#16).
+module "pipeline" {
+  source            = "./modules/pipeline"
+  name_prefix       = var.name_prefix
+  role_arn          = data.aws_iam_role.lab.arn
+  bucket_name       = module.storage.bucket_name
+  functions_dir     = "${path.root}/../pipeline/functions"
+  common_dir        = "${path.root}/../pipeline/common"
+  statemachine_file = "${path.root}/../pipeline/statemachine/pipeline.asl.json"
+  alert_email       = var.alert_email
+  schedule_enabled  = var.pipeline_schedule_enabled
+  pandas_layer_arn  = var.pandas_layer_arn
+}
+
+# Glue Data Catalog + Athena (spec 40 §2, #17). Partition projection -> no crawler.
+module "catalog" {
+  source               = "./modules/catalog"
+  bucket_name          = module.storage.bucket_name
+  devices_csv          = "${path.root}/../pipeline/common/devices.csv"
+  date_start           = var.catalog_date_start
+  bytes_scanned_cutoff = var.athena_bytes_scanned_cutoff
+}
+
+# API for the web (spec 40 §3, #18). Reads Athena + publish markers, own HTTP API.
+module "api" {
+  source           = "./modules/api"
+  name_prefix      = var.name_prefix
+  role_arn         = data.aws_iam_role.lab.arn
+  bucket_name      = module.storage.bucket_name
+  source_dir       = "${path.root}/../api"
+  common_dir       = "${path.root}/../pipeline/common"
+  athena_database  = module.catalog.database_name
+  athena_workgroup = module.catalog.workgroup_name
+  athena_output    = module.catalog.results_location
+  allowed_origins  = var.api_allowed_origins
 }
