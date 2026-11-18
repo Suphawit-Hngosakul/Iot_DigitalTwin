@@ -105,6 +105,15 @@ void gpsTask(void *parameter) {
       LOG("INFO", "GPS stats: chars=%lu ok=%lu failCRC=%lu sats=%u valid=%d",
           (unsigned long)gps.charsProcessed(), (unsigned long)gps.passedChecksum(),
           (unsigned long)gps.failedChecksum(), (unsigned)gpsSats, (int)gpsValid);
+
+      // No new bytes in 30 s = the module stopped talking (power / TX wire /
+      // module reset). A soft reboot of the ESP32 does not power-cycle it.
+      static uint32_t lastChars = 0;
+      uint32_t chars = gps.charsProcessed();
+      if (chars == lastChars)
+        LOG("WARN", "GPS UART silent for 30s (chars=%lu) - check GPS power / TX->GPIO%d",
+            (unsigned long)chars, GPS_RX_PIN);
+      lastChars = chars;
     }
 
     // Fix timeout. This task is the only writer of gpsValid, so reading it
