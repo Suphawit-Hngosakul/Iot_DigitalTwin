@@ -1,10 +1,11 @@
-"""Lambda satellite_ingest (issue #27, spec 50 §3-4).
+"""Lambda satellite_ingest (issue #27, #28, spec 50 §3-4).
 
 Events:
     {"mode": "ingest"}                                   # EventBridge รายวัน: 35 วันล่าสุด
     {"mode": "ingest", "start_date": "2024-01-01", "end_date": "2024-03-01"}   # backfill ทีละช่วง
     {"mode": "composite", "year": 2024}                  # สร้าง/อัปเดต composite หน้าร้อนปีนั้น
     {"mode": "catalog"}                                  # สร้าง curated/satellite/catalog.json ใหม่
+    {"mode": "buildings"}                                # คำนวณความหนาแน่นสิ่งปลูกสร้างต่อเซลล์ 90 m
     ทุกโหมดใส่ "dry_run": true / "force": true ได้; ingest ใส่ "max_cloud_pct", "min_valid_ratio" ได้
 
 mode=ingest อัปเดต composite ของฤดูที่มีฉากในช่วงที่ดึงให้เอง (สร้างใหม่เฉพาะเมื่อมีฉากใหม่)
@@ -17,6 +18,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
+from buildings import run_buildings_ingest
 from ingest import (
     DEFAULT_MAX_CLOUD_PCT,
     DEFAULT_MIN_VALID_RATIO,
@@ -56,6 +58,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     elif mode == "catalog":
         result = update_catalog()
 
+    elif mode == "buildings":
+        conf_min = float(event["conf_min"]) if "conf_min" in event else None
+        result = run_buildings_ingest(dry_run=dry_run, force=force, conf_min=conf_min)
+
     elif mode == "ingest":
         now_utc = datetime.now(timezone.utc)
         start_date = event.get("start_date") or (now_utc - timedelta(days=DEFAULT_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
@@ -90,7 +96,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             result["catalog"] = update_catalog()
 
     else:
-        raise ValueError(f"unknown mode: {mode!r} (ingest | composite | catalog)")
+        raise ValueError(f"unknown mode: {mode!r} (ingest | composite | catalog | buildings)")
 
     log.info(json.dumps(result, ensure_ascii=False, default=str))
 
