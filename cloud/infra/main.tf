@@ -84,3 +84,17 @@ module "api" {
   athena_output    = module.catalog.results_location
   allowed_origins  = var.api_allowed_origins
 }
+
+# GEE connectivity test Lambda via Workload Identity Federation (spec 50, #25).
+# Off by default: needs gee-layer.zip built by cloud/satellite/layer/build_layer.py.
+module "satellite" {
+  count        = var.satellite_enabled ? 1 : 0
+  source       = "./modules/satellite"
+  name_prefix  = var.name_prefix
+  role_arn     = data.aws_iam_role.lab.arn
+  handler_file = "${path.root}/../satellite/test_lambda/handler.py"
+  layer_zip    = var.gee_layer_zip != "" ? var.gee_layer_zip : "${path.root}/../satellite/layer/build/gee-layer.zip"
+  gee_project  = var.gee_project
+  gee_assets   = var.gee_assets
+  gee_wif      = var.gee_wif
+}

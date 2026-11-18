@@ -72,3 +72,43 @@ variable "api_allowed_origins" {
   type        = list(string)
   default     = ["*"]
 }
+
+variable "satellite_enabled" {
+  description = "Deploy the GEE test Lambda + layer (#25). Build the layer first: python cloud/satellite/layer/build_layer.py"
+  type        = bool
+  default     = false
+}
+
+variable "gee_layer_zip" {
+  description = "Path to gee-layer.zip. Empty = cloud/satellite/layer/build/gee-layer.zip (output of build_layer.py)."
+  type        = string
+  default     = ""
+}
+
+variable "gee_project" {
+  description = "Google Cloud project that owns the GEE assets (spec 50 §5, option A = Get's project)"
+  type        = string
+  default     = "turnkey-tribute-511903-t6"
+}
+
+variable "gee_assets" {
+  description = "Asset the test Lambda reads to prove access"
+  type        = string
+  default     = "projects/turnkey-tribute-511903-t6/assets/laksi_boundary"
+}
+
+variable "gee_wif" {
+  description = "Workload Identity Federation (AWS -> Google) used instead of a service-account key. Not secret."
+  type = object({
+    project_number  = string # numeric id of the project holding the identity pool
+    pool_id         = string
+    provider_id     = string
+    service_account = string # email the Lambda impersonates
+  })
+  default = {
+    project_number  = "959910184696"
+    pool_id         = "6609650251"
+    provider_id     = "aws-pool-gee-iot"
+    service_account = "service-gee-iot@turnkey-tribute-511903-t6.iam.gserviceaccount.com"
+  }
+}
