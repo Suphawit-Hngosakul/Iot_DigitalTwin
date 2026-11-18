@@ -16,6 +16,7 @@ IaC ของทุกอย่างใน `cloud/` ด้วย **Terraform/Op
 | `pipeline` | 30 | #11–#16 | Lambda 6 ตัว `iot-dt-iot-*` + Step Functions `iot-dt-iot-pipeline` + Scheduler ทุกชั่วโมงนาทีที่ 5 (เวลาไทย) + SNS `iot-dt-iot-pipeline-alerts` (`cloud/pipeline/`) |
 | `catalog` | 40 | #17 | Glue database `iot_walking` + ตาราง `raw_csv`, `raw_csv_unknown`, `readings_1s`, `readings_1min`, `quality` (partition projection) + Athena workgroup `iot_walking` + saved queries + lifecycle `athena-results/` 7 วัน (ใน `storage`) |
 | `api` | 40 | #18 | Lambda `iot-dt-api` (Py3.12, LabRole) + HTTP API แยก `iot-dt-api`: `GET /devices /latest /readings /quality` + CORS (`api_allowed_origins`) + log 14 วัน (`cloud/api/`) |
+| `satellite` | 50 | #25 | Lambda `iot-dt-satellite-test` (Py3.12, LabRole) + layer `iot-dt-gee` (earthengine-api) ยืนยันตัวกับ GEE ด้วย WIF ไม่มี key (`cloud/satellite/`) ปิดไว้เป็นค่าเริ่มต้น เปิดด้วย `satellite_enabled = true` หลังรัน `cloud/satellite/layer/build_layer.py` |
 
 ```bash
 aws s3 mb s3://iot-dt-<account-id> --region us-east-1   # สร้าง bucket เองก่อน (ดูด้านล่าง)

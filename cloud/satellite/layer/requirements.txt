@@ -1,0 +1,4 @@
+# Lambda layer for GEE (python3.12, x86_64). Build: python build_layer.py
+# Versions match the layer tested on 2026-11-19.
+earthengine-api==1.7.53
+google-auth==2.62.2

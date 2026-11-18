@@ -1,4 +1,6 @@
-# Lambda satellite GEE test (issue #25, spec 50).
+# GEE connectivity test Lambda (issue #25, spec 50).
+# Auth: Workload Identity Federation, the Lambda's LabRole credentials are
+# exchanged for a Google token, so no service-account key is stored anywhere.
 terraform {
   required_providers {
     aws     = { source = "hashicorp/aws" }
@@ -14,56 +16,74 @@ variable "role_arn" {
   type = string
 }
 
-variable "source_dir" {
-  description = "Directory containing handler.py and gee-wif-config.json"
+variable "handler_file" {
+  description = "Path to handler.py"
   type        = string
 }
 
 variable "layer_zip" {
-  description = "Path to gee-layer.zip"
+  description = "Path to gee-layer.zip (python/ folder, built for python3.12 x86_64)"
   type        = string
 }
 
 variable "gee_project" {
-  description = "Google Earth Engine project ID"
-  type        = string
-  default     = "turnkey-tribute-511903-t6"
+  type = string
 }
 
 variable "gee_assets" {
-  description = "Asset path to verify in GEE"
-  type        = string
-  default     = "projects/turnkey-tribute-511903-t6/assets/laksi_boundary"
+  type = string
+}
+
+variable "gee_wif" {
+  type = object({
+    project_number  = string
+    pool_id         = string
+    provider_id     = string
+    service_account = string
+  })
 }
 
 locals {
   function_name = "${var.name_prefix}-satellite-test"
+
+  # Same shape as `gcloud iam workload-identity-pools create-cred-config --aws`.
+  wif_config = jsonencode({
+    universe_domain    = "googleapis.com"
+    type               = "external_account"
+    audience           = "//iam.googleapis.com/projects/${var.gee_wif.project_number}/locations/global/workloadIdentityPools/${var.gee_wif.pool_id}/providers/${var.gee_wif.provider_id}"
+    subject_token_type = "urn:ietf:params:aws:token-type:aws4_request"
+    token_url          = "https://sts.googleapis.com/v1/token"
+    credential_source = {
+      environment_id                 = "aws1"
+      region_url                     = "http://169.254.169.254/latest/meta-data/placement/availability-zone"
+      url                            = "http://169.254.169.254/latest/meta-data/iam/security-credentials"
+      regional_cred_verification_url = "https://sts.{region}.amazonaws.com?Action=GetCallerIdentity&Version=2011-06-15"
+    }
+    service_account_impersonation_url = "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${var.gee_wif.service_account}:generateAccessToken"
+  })
 }
 
-# 1. GEE Lambda Layer (earthengine-api, google-auth for python3.12 x86_64)
+# earthengine-api + google-auth, shared later with satellite_ingest (#27).
 resource "aws_lambda_layer_version" "gee" {
-  layer_name               = "${var.name_prefix}-gee-layer"
+  layer_name               = "${var.name_prefix}-gee"
   filename                 = var.layer_zip
   source_code_hash         = filebase64sha256(var.layer_zip)
   compatible_runtimes      = ["python3.12"]
   compatible_architectures = ["x86_64"]
-  description              = "Google Earth Engine and Google Auth WIF dependencies"
+  description              = "earthengine-api + google-auth (cloud/satellite/layer/requirements.txt)"
 }
 
-# 2. Package Lambda code (handler.py + gee-wif-config.json)
 data "archive_file" "satellite" {
   type        = "zip"
   output_path = "${path.module}/build/satellite_test.zip"
-  source_dir  = var.source_dir
+  source_file = var.handler_file
 }
 
-# 3. CloudWatch Log Group
 resource "aws_cloudwatch_log_group" "satellite" {
   name              = "/aws/lambda/${local.function_name}"
   retention_in_days = 14
 }
 
-# 4. Lambda Function
 resource "aws_lambda_function" "satellite" {
   function_name    = local.function_name
   role             = var.role_arn
@@ -74,13 +94,13 @@ resource "aws_lambda_function" "satellite" {
   source_code_hash = data.archive_file.satellite.output_base64sha256
   memory_size      = 512
   timeout          = 60
-
-  layers = [aws_lambda_layer_version.gee.arn]
+  layers           = [aws_lambda_layer_version.gee.arn]
 
   environment {
     variables = {
-      GEE_PROJECT = var.gee_project
-      GEE_ASSETS  = var.gee_assets
+      GEE_PROJECT    = var.gee_project
+      GEE_ASSETS     = var.gee_assets
+      GEE_WIF_CONFIG = local.wif_config
     }
   }
 
@@ -88,16 +108,9 @@ resource "aws_lambda_function" "satellite" {
 }
 
 output "function_name" {
-  description = "Name of the GEE test Lambda function"
-  value       = aws_lambda_function.satellite.function_name
-}
-
-output "function_arn" {
-  description = "ARN of the GEE test Lambda function"
-  value       = aws_lambda_function.satellite.arn
+  value = aws_lambda_function.satellite.function_name
 }
 
 output "layer_arn" {
-  description = "ARN of the GEE Lambda Layer"
-  value       = aws_lambda_layer_version.gee.arn
+  value = aws_lambda_layer_version.gee.arn
 }

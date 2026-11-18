@@ -51,3 +51,13 @@ output "api_url" {
   description = "Base URL of the web API (#18), e.g. <this>/devices"
   value       = module.api.api_url
 }
+
+output "satellite_function_name" {
+  description = "GEE test Lambda (#25), null when satellite_enabled = false"
+  value       = one(module.satellite[*].function_name)
+}
+
+output "gee_layer_arn" {
+  description = "GEE Lambda layer ARN, reuse for satellite_ingest (#27); null when satellite_enabled = false"
+  value       = one(module.satellite[*].layer_arn)
+}
