@@ -244,6 +244,12 @@ static void appendCSVRow(float splA, float splZ, bool splOk) {
 }
 
 
+void csvStatus(uint32_t &recordId, uint32_t &sdErrors) {
+  recordId = csvRecordId;    // 32-bit reads: atomic on the ESP32
+  sdErrors = sdErrorCount;
+}
+
+
 // =============================================================================
 //  A-weighting filter (IEC 61672) for fs = 16 kHz
 //

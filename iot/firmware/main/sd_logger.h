@@ -30,6 +30,10 @@ void csvActivePath(char *out, size_t len);
 void appendBootLog(uint32_t session, int resetCode, const char *resetReason,
                    uint32_t prevUptimeSec, uint32_t prevMinHeap);
 
+// Last Record_ID written this session and consecutive SD write errors
+// (for the realtime health message, #6).
+void csvStatus(uint32_t &recordId, uint32_t &sdErrors);
+
 // Core 0: WAV recording + SPL compute + CSV logging + SD health/remount.
 void sdProcessTask(void *parameter);
 

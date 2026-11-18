@@ -261,3 +261,28 @@ iot/firmware/
 | `code=-1 connection refused` กับ `http://` | EC2 relay ดับ (Learner Lab หมด session) หรือ IP ผิด → เปิด lab ใหม่, `curl http://<ip>:8080/health` |
 | `code=502` | relay ติดต่อ API Gateway ไม่ได้ → ดู `journalctl -u iot-dt-relay` บน EC2 |
 | `Backlog` ไม่ลดทั้งที่ `WiFi:UP` | ดู `[UPL] … resend in` (server ล่ม / Learner Lab หมด session) — ข้อมูลยังอยู่ใน SD ส่งต่อเองเมื่อกลับมา |
+
+## 8. ส่งค่า realtime (issue #6)
+
+`rtTask` เปิด WebSocket **`ws://` ธรรมดา** ค้างไว้ที่ hub (`cloud/realtime-hub/`, สเปค 22) ซึ่งรันบน EC2 ตัวเดียวกับ relay ส่ง `hello` ตอนต่อได้ แล้ว `reading` ทุก 2 วินาที (ค่าเซนเซอร์ + health ตามสเปค 01 §3) ส่งไม่ได้ก็ทิ้ง ไม่เก็บคิว — ข้อมูลจริงยังขึ้นทาง CSV (§7)
+
+**เปิดใช้:**
+
+1. `terraform apply` ใน `cloud/infra` (`hub_enabled = true` เป็นค่าเริ่ม) → `terraform output hub_device_url` ได้ `ws://<relay-ip>:8081/device`
+2. ใส่ในหน้า Setup ช่อง **Realtime URL (hub)** หรือ `WSS_URL` ใน `secrets.h` (ค่าในหน้า Setup ทับ `secrets.h` เหมือน Ingest URL)
+3. ใช้ `DEVICE_TOKEN` ตัวเดียวกับอัป CSV ไม่ต้องสร้างใหม่
+4. flash แล้วดู Serial: `[RT] connected to …:8081/device …` และใน `[STAT]` มี `RT:UP Sent:<n>`
+5. เปิด `cloud/realtime-hub/live.html?hub=ws://<relay-ip>:8081/live` ในเบราว์เซอร์ เห็นการ์ดของเครื่อง
+
+ว่าง Realtime URL หรือ `DEVICE_TOKEN` = ไม่ส่ง
+
+**ทำไมเป็น `ws://` (D22):** เหตุผลเดียวกับ §7 คือบอร์ดไม่มี RAM ทำ TLS ระหว่างอัด WAV — client เขียนเองบน `WiFiClient` (ไม่ต้องลงไลบรารีเพิ่ม) ใช้ RAM ราว buffer 1 KB + socket · token วิ่ง **ไม่เข้ารหัส** เหมือน relay
+
+| อาการ | วิธีแก้ |
+|---|---|
+| `[RT] realtime off` | ยังไม่ได้ใส่ Realtime URL หรือ `DEVICE_TOKEN` |
+| `RT realtime stopped … token rejected (401)` | token ไม่อยู่ใน `device_token_hashes` → แก้แล้ว `terraform apply` + รีบูตบอร์ด |
+| `RT realtime stopped … wss:// needs TLS` | URL เป็น `wss://` → เปลี่ยนเป็น `ws://…:8081/device` |
+| `[RT] connect … failed (-1)` วนไป | EC2 ดับ (Learner Lab หมด session) / IP หรือ port ผิด → `curl http://<ip>:8081/healthz` |
+| `[RT] connect … failed (404)` | path ไม่ใช่ `/device` |
+| `[STACK] rtTask:` ต่ำกว่า ~800 | เพิ่ม `STACK_RT` ใน `config.h` |
