@@ -1,331 +1,378 @@
-"""Satellite Ingest Lambda & CLI: Google Earth Engine -> S3 (issue #27, spec 50).
-
-Fetches Landsat 8 & 9 Collection 2 Level 2 scenes over Lak Si AOI.
-For each scene with cloud coverage <= MAX_CLOUD_PCT (40%):
-  - bands.tif      (GeoTIFF 30m in EPSG:32647 with bands: lst_c, ndvi, ndbi, cloud_mask)
-  - metadata.json  (scene ID, acquisition time, cloud %, sensor, formulas)
-  - _COMPLETE      (marker indicating upload completion)
-
-Saved to S3 under raw/satellite/scene_<YYYY-MM-DD>/
-Idempotent: skips scenes if _COMPLETE already exists in S3.
-"""
-
-from __future__ import annotations
-
-import argparse
+import csv
+import io
 import json
-import logging
 import os
-import sys
-import urllib.request
-from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 import boto3
-from botocore.exceptions import ClientError
 import ee
+import requests
+from botocore.exceptions import ClientError
 from google.auth import aws
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("satellite_ingest")
-
-# Constants & Defaults
-DEFAULT_PROJECT = "turnkey-tribute-511903-t6"
-DEFAULT_ASSET_ROI = "projects/turnkey-tribute-511903-t6/assets/laksi_boundary"
-DEFAULT_BUCKET = os.environ.get("DATA_BUCKET", "iot-dt-363245343149")
+# ค่าคงที่มาตรฐานอ้างอิงจาก spike26 และ grid.py
 CRS = "EPSG:32647"
-MAX_CLOUD_PCT = 40.0
-FORMULA_VERSION = "v3"
-CONFIG_FILENAME = "gee-wif-config.json"
-LOCAL_TZ = timezone(timedelta(hours=7), "Asia/Bangkok")
+SCALE = 30
+ORIGIN_X = 660015.0
+ORIGIN_Y = 1545015.0
+CRS_TRANSFORM = [SCALE, 0, ORIGIN_X, 0, -SCALE, ORIGIN_Y]
+NODATA_VALUE = -9999.0
 
-_INITIALIZED = False
-_s3_client = None
-
-
-def get_s3():
-    global _s3_client
-    if _s3_client is None:
-        _s3_client = boto3.client("s3")
-    return _s3_client
+_EE_INITIALIZED = False
 
 
-def init_gee(config_dir: Path | None = None) -> None:
-    """Initialize GEE client using WIF credentials or ambient environment."""
-    global _INITIALIZED
-    if _INITIALIZED:
+def init_ee() -> None:
+    """เชื่อมต่อ GEE ผ่าน Workload Identity Federation (รันครั้งเดียวตอน Cold Start)"""
+    global _EE_INITIALIZED
+    if _EE_INITIALIZED:
         return
 
-    # If ee was already initialized (e.g. by handler.py), don't re-initialize
-    try:
-        if getattr(ee.data, "_credentials", None) is not None:
-            _INITIALIZED = True
-            return
-    except Exception:
-        pass
+    config_path = os.path.join(os.path.dirname(__file__), "gee-wif-config.json")
+    with open(config_path, "r", encoding="utf-8") as f:
+        info = json.load(f)
 
-    project = os.environ.get("GEE_PROJECT", DEFAULT_PROJECT)
-
-    # Search for WIF config in multiple locations
-    search_dirs = [
-        config_dir,
-        Path(__file__).parent,
-        Path.cwd(),
-    ]
-    config_file = None
-    for d in search_dirs:
-        if d and (d / CONFIG_FILENAME).exists():
-            config_file = d / CONFIG_FILENAME
-            break
-
-    if config_file:
-        log.info("Authenticating GEE using WIF config: %s", config_file)
-        with open(config_file, encoding="utf-8") as f:
-            info = json.load(f)
-        credentials = aws.Credentials.from_info(
-            info,
-            scopes=[
-                "https://www.googleapis.com/auth/earthengine",
-                "https://www.googleapis.com/auth/cloud-platform",
-            ],
-        )
-        ee.Initialize(credentials, project=project)
-        _INITIALIZED = True
-    else:
-        log.info("No WIF config found; initializing GEE using ambient credentials")
-        ee.Initialize(project=project)
-        _INITIALIZED = True
-
-    log.info("Google Earth Engine initialized successfully (project: %s)", project)
-
-
-def prep_scene(img: ee.Image) -> ee.Image:
-    """Calculate LST, NDVI, NDBI, and cloud mask from Landsat C2 L2."""
-    qa = img.select("QA_PIXEL")
-    # Bit 1-4: dilated cloud (2), cirrus (4), cloud (8), shadow (16)
-    clear = qa.bitwiseAnd(30).eq(0).rename("cloud_mask")
-
-    # LST in Celsius
-    lst = (
-        img.select("ST_B10")
-        .multiply(0.00341802)
-        .add(149.0)
-        .subtract(273.15)
-        .rename("lst_c")
+    credentials = aws.Credentials.from_info(
+        info,
+        scopes=[
+            "https://www.googleapis.com/auth/earthengine",
+            "https://www.googleapis.com/auth/cloud-platform",
+        ],
     )
-
-    # Surface reflectance & indices
-    sr = img.select(["SR_B4", "SR_B5", "SR_B6"]).multiply(0.0000275).add(-0.2)
-    b4 = sr.select("SR_B4")
-    b5 = sr.select("SR_B5")
-    b6 = sr.select("SR_B6")
-
-    ndvi = b5.subtract(b4).divide(b5.add(b4)).rename("ndvi")
-    ndbi = b6.subtract(b5).divide(b6.add(b5)).rename("ndbi")
-
-    out = lst.addBands([ndvi, ndbi, clear]).copyProperties(
-        img, ["system:time_start", "system:index"]
-    )
-    return ee.Image(out)
+    project_id = os.environ.get("GEE_PROJECT", "turnkey-tribute-511903-t6")
+    ee.Initialize(credentials, project=project_id)
+    _EE_INITIALIZED = True
 
 
-def check_scene_completed(bucket: str, prefix: str) -> bool:
-    """Check if _COMPLETE marker already exists in S3."""
-    s3 = get_s3()
+def _s3_key_exists(s3_client: Any, bucket: str, key: str) -> bool:
     try:
-        s3.head_object(Bucket=bucket, Key=f"{prefix}_COMPLETE")
+        s3_client.head_object(Bucket=bucket, Key=key)
         return True
-    except ClientError as e:
-        if e.response["Error"]["Code"] in ("404", "NoSuchKey", "403"):
-            return False
+    except ClientError:
         return False
 
 
-def ingest_scene(scene: ee.Image, roi: ee.Geometry, bucket: str, dry_run: bool = False) -> dict[str, Any]:
-    """Process a single Landsat scene, download products, and upload to S3."""
-    scene_id = scene.get("system:index").getInfo()
-    time_ms = scene.get("system:time_start").getInfo()
-    dt_utc = datetime.fromtimestamp(time_ms / 1000.0, tz=timezone.utc)
-    dt_local = dt_utc.astimezone(LOCAL_TZ)
-    date_str = dt_local.date().isoformat()
+def _build_stacked_image(mosaic_img: ee.Image, roi: ee.Geometry) -> ee.Image:
+    """คำนวณ LST, NDVI, NDBI และ Cloud Mask ตามสูตรมาตรฐาน spike26"""
+    qa = mosaic_img.select("QA_PIXEL")
+    clear = qa.bitwiseAnd(30).eq(0)
 
-    prefix = f"raw/satellite/scene_{date_str}/"
-    log.info("Processing scene: %s (date: %s, prefix: %s)", scene_id, date_str, prefix)
-
-    if not dry_run and check_scene_completed(bucket, prefix):
-        log.info("Scene %s already ingested (_COMPLETE exists). Skipping.", scene_id)
-        return {"scene_id": scene_id, "date": date_str, "status": "already_exists"}
-
-    # 1. Check cloud percentage in AOI
-    qa = scene.select("QA_PIXEL")
-    cloud_mask = qa.bitwiseAnd(30).neq(0)
-    cloud_mean = cloud_mask.reduceRegion(
-        reducer=ee.Reducer.mean(),
-        geometry=roi,
-        scale=30,
-        crs=CRS,
-        maxPixels=1e7,
-    ).get("QA_PIXEL").getInfo()
-
-    cloud_pct = float(cloud_mean or 0.0) * 100.0
-    log.info("Scene %s cloud coverage in AOI: %.2f%%", scene_id, cloud_pct)
-
-    if cloud_pct > MAX_CLOUD_PCT:
-        log.warning("Scene %s exceeds MAX_CLOUD_PCT (%.2f%% > %.2f%%). Skipping.", scene_id, cloud_pct, MAX_CLOUD_PCT)
-        return {"scene_id": scene_id, "date": date_str, "status": "skipped_cloud", "cloud_pct": cloud_pct}
-
-    # 2. Compute 4 bands
-    processed = prep_scene(scene).clip(roi)
-
-    # 3. Create metadata
-    metadata = {
-        "scene_id": scene_id,
-        "date": date_str,
-        "acquisition_time_utc": dt_utc.isoformat(),
-        "acquisition_time_local": dt_local.isoformat(),
-        "cloud_pct_aoi": round(cloud_pct, 2),
-        "crs": CRS,
-        "resolution_m": 30,
-        "formula_version": FORMULA_VERSION,
-        "ingest_timestamp_utc": datetime.now(timezone.utc).isoformat(),
-    }
-
-    if dry_run:
-        log.info("[DRY RUN] Would upload %s to s3://%s/%s", scene_id, bucket, prefix)
-        return {"scene_id": scene_id, "date": date_str, "status": "dry_run", "metadata": metadata}
-
-    s3 = get_s3()
-
-    # 4. Download and upload GeoTIFF
-    log.info("Requesting GeoTIFF download URL from Earth Engine...")
-    tif_url = processed.select(["lst_c", "ndvi", "ndbi", "cloud_mask"]).getDownloadURL({
-        "name": f"bands_{date_str}",
-        "scale": 30,
-        "crs": CRS,
-        "region": roi,
-        "format": "GEO_TIFF",
-    })
-    log.info("Downloading GeoTIFF from GEE...")
-    with urllib.request.urlopen(tif_url) as resp:
-        tif_bytes = resp.read()
-    log.info("Downloaded GeoTIFF (%d bytes). Uploading to s3://%s/%sbands.tif...", len(tif_bytes), bucket, prefix)
-    s3.put_object(
-        Bucket=bucket,
-        Key=f"{prefix}bands.tif",
-        Body=tif_bytes,
-        ContentType="image/tiff",
+    # 1. Land Surface Temperature (°C)
+    lst = (
+        mosaic_img.select("ST_B10")
+        .multiply(0.00341802)
+        .add(149.0)
+        .subtract(273.15)
+        .updateMask(clear)
+        .rename("lst_c")
     )
 
-    # 5. Upload metadata.json
-    log.info("Uploading metadata.json...")
-    s3.put_object(
+    # 2. Surface Reflectance -> NDVI & NDBI
+    sr = mosaic_img.select(["SR_B4", "SR_B5", "SR_B6"]).multiply(0.0000275).add(-0.2)
+    ndvi = (
+        sr.select("SR_B5")
+        .subtract(sr.select("SR_B4"))
+        .divide(sr.select("SR_B5").add(sr.select("SR_B4")))
+        .updateMask(clear)
+        .rename("ndvi")
+    )
+    ndbi = (
+        sr.select("SR_B6")
+        .subtract(sr.select("SR_B5"))
+        .divide(sr.select("SR_B6").add(sr.select("SR_B5")))
+        .updateMask(clear)
+        .rename("ndbi")
+    )
+
+    # 3. Cloud Mask (1 = ท้องฟ้าเปิด, 0 = มีเมฆ/เงาเมฆ)
+    cloud_mask = clear.toFloat().rename("cloud_mask")
+
+    # รวมแบนด์, ล็อก Grid 30m, ตัดตามขอบเขตหลักสี่ และแทนค่าพิกเซลว่างด้วย -9999
+    stack = (
+        lst.addBands([ndvi, ndbi, cloud_mask])
+        .setDefaultProjection(crs=CRS, crsTransform=CRS_TRANSFORM)
+        .clip(roi)
+        .unmask(NODATA_VALUE)
+    )
+    return stack
+
+
+def _generate_pixels_csv(stack: ee.Image, roi: ee.Geometry) -> tuple[str, int, int]:
+    """สกัดค่าพิกเซลทั้งหมดใน ROI ออกมาเป็นข้อความ CSV พร้อมนับจำนวนพิกเซล"""
+    coords = ee.Image.pixelCoordinates(CRS).clip(roi).unmask(NODATA_VALUE)
+    combined = coords.addBands(stack)
+
+    reduced = combined.reduceRegion(
+        reducer=ee.Reducer.toList(),
+        geometry=roi,
+        scale=SCALE,
+        crs=CRS,
+        maxPixels=1e7,
+    ).getInfo()
+
+    xs = reduced.get("x", [])
+    ys = reduced.get("y", [])
+    lsts = reduced.get("lst_c", [])
+    ndvis = reduced.get("ndvi", [])
+    ndbis = reduced.get("ndbi", [])
+    masks = reduced.get("cloud_mask", [])
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["x", "y", "lst_c", "ndvi", "ndbi", "cloud_mask"])
+
+    total_pixels = 0
+    valid_pixels = 0
+
+    for x, y, lst_v, ndvi_v, ndbi_v, mask_v in zip(xs, ys, lsts, ndvis, ndbis, masks):
+        if x == NODATA_VALUE or y == NODATA_VALUE:
+            continue
+
+        total_pixels += 1
+        is_valid = mask_v == 1.0 and lst_v != NODATA_VALUE
+        if is_valid:
+            valid_pixels += 1
+
+        writer.writerow([
+            round(float(x), 2),
+            round(float(y), 2),
+            round(float(lst_v), 4) if lst_v != NODATA_VALUE else NODATA_VALUE,
+            round(float(ndvi_v), 4) if ndvi_v != NODATA_VALUE else NODATA_VALUE,
+            round(float(ndbi_v), 4) if ndbi_v != NODATA_VALUE else NODATA_VALUE,
+            int(mask_v) if mask_v != NODATA_VALUE else int(NODATA_VALUE),
+        ])
+
+    return output.getvalue(), total_pixels, valid_pixels
+
+
+def _write_skip_record(
+    s3_client: Any,
+    bucket: str,
+    scene_date: str,
+    reason: str,
+    details: Dict[str, Any],
+) -> None:
+    """บันทึกเหตุผลการข้ามฉากลง S3 เพื่อใช้ตรวจสอบย้อนหลัง"""
+    payload = {
+        "scene_date": scene_date,
+        "month": scene_date[:7],
+        "status": "skipped",
+        "reason": reason,
+        "details": details,
+        "logged_at": datetime.now(timezone.utc).isoformat(),
+    }
+    s3_client.put_object(
         Bucket=bucket,
-        Key=f"{prefix}metadata.json",
-        Body=json.dumps(metadata, indent=2),
+        Key=f"raw/satellite/skipped/{scene_date}.json",
+        Body=json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"),
         ContentType="application/json",
     )
 
-    # 6. Upload _COMPLETE marker
-    log.info("Writing _COMPLETE marker...")
-    s3.put_object(
-        Bucket=bucket,
-        Key=f"{prefix}_COMPLETE",
-        Body=b"",
-    )
-
-    log.info("Successfully ingested scene %s into s3://%s/%s", scene_id, bucket, prefix)
-    return {"scene_id": scene_id, "date": date_str, "status": "ingested", "cloud_pct": cloud_pct}
-
 
 def run_ingest(
-    date_start: str,
-    date_end: str,
-    bucket: str = DEFAULT_BUCKET,
-    asset_roi: str = DEFAULT_ASSET_ROI,
-    summer_only: bool = False,
+    start_date: str,
+    end_date: str,
     dry_run: bool = False,
-) -> list[dict[str, Any]]:
-    """Find and ingest scenes within the date range."""
-    init_gee()
-    roi = ee.FeatureCollection(asset_roi).geometry()
+    force: bool = False,
+    max_cloud_pct: float = 75.0,
+    min_valid_ratio: float = 0.15,
+) -> Dict[str, Any]:
+    """ดึงข้อมูล Landsat 8/9 รายฉาก (รวมภาพวันเดียวกัน) และบันทึกลง S3"""
+    init_ee()
 
-    log.info("Searching Landsat 8/9 scenes from %s to %s (summer_only=%s)...", date_start, date_end, summer_only)
+    bucket = os.environ.get("DATA_BUCKET")
+    if not bucket and not dry_run:
+        raise ValueError("Missing DATA_BUCKET environment variable")
+
+    asset_path = os.environ.get(
+        "GEE_ASSETS", "projects/turnkey-tribute-511903-t6/assets/laksi_boundary"
+    )
+    roi = ee.FeatureCollection(asset_path).geometry()
+    s3 = boto3.client("s3") if not dry_run else None
+
+    # รวมคอลเลกชัน Landsat 8 และ 9 ทุกเดือนในช่วงวันที่ที่กำหนด
     col = (
         ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
         .merge(ee.ImageCollection("LANDSAT/LC09/C02/T1_L2"))
         .filterBounds(roi)
-        .filterDate(date_start, date_end)
+        .filterDate(start_date, end_date)
     )
 
-    if summer_only:
-        col = col.filter(ee.Filter.calendarRange(3, 5, "month"))
-
-    scenes = col.sort("system:time_start").toList(100)
-    count = scenes.size().getInfo()
-    log.info("Found %d candidate scenes", count)
-
-    results = []
-    for i in range(count):
-        scene = ee.Image(scenes.get(i))
-        res = ingest_scene(scene, roi, bucket, dry_run=dry_run)
-        results.append(res)
-
-    return results
-
-
-def lambda_handler(event: dict[str, Any] | None = None, context: Any = None) -> dict[str, Any]:
-    """AWS Lambda entry point for scheduled or manual backfill."""
-    event = event or {}
-    bucket = event.get("bucket", os.environ.get("DATA_BUCKET", DEFAULT_BUCKET))
-    summer_only = event.get("summer_only", False)  # รายฉากดึงทุกเดือน; composite เท่านั้นที่จำกัด มี.ค.-พ.ค.
-    dry_run = event.get("dry_run", False)
-
-    # If date range given in event, use it (backfill)
-    # Otherwise, default to the last 16 days (daily check)
-    if "date_start" in event and "date_end" in event:
-        d_start = event["date_start"]
-        d_end = event["date_end"]
-    else:
-        today = date.today()
-        d_start = (today - timedelta(days=16)).isoformat()
-        d_end = (today + timedelta(days=1)).isoformat()
-
-    try:
-        results = run_ingest(
-            date_start=d_start,
-            date_end=d_end,
-            bucket=bucket,
-            summer_only=summer_only,
-            dry_run=dry_run,
+    def _extract_meta(img: ee.Image) -> ee.Feature:
+        return ee.Feature(
+            None,
+            {
+                "scene_id": img.get("system:index"),
+                "date_str": ee.Date(img.get("system:time_start")).format("YYYY-MM-dd"),
+                "spacecraft": img.get("SPACECRAFT_ID"),
+            },
         )
-        return {
-            "statusCode": 200,
-            "body": json.dumps({"status": "success", "processed_scenes": results}),
-        }
-    except Exception as exc:
-        log.exception("Error in satellite ingest: %s", exc)
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"status": "error", "message": str(exc)}),
-        }
 
+    meta_list = col.map(_extract_meta).getInfo().get("features", [])
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Ingest Landsat scenes over Lak Si into S3")
-    parser.add_argument("--start", default="2024-03-01", help="Start date (YYYY-MM-DD)")
-    parser.add_argument("--end", default="2024-05-31", help="End date (YYYY-MM-DD)")
-    parser.add_argument("--bucket", default=DEFAULT_BUCKET, help="Target S3 bucket")
-    parser.add_argument("--all-months", action="store_true", help="Include all months, not just Mar-May")
-    parser.add_argument("--dry-run", action="store_true", help="Check and print without uploading")
-    args = parser.parse_args()
+    # จัดกลุ่มฉากตามวันที่ (YYYY-MM-dd) เพื่อทำ Mosaic กรณีมีภาพวันเดียวกัน
+    scenes_by_date: Dict[str, List[Dict[str, str]]] = {}
+    for feat in meta_list:
+        props = feat["properties"]
+        d_str = props["date_str"]
+        scenes_by_date.setdefault(d_str, []).append(props)
 
-    res = run_ingest(
-        date_start=args.start,
-        date_end=args.end,
-        bucket=args.bucket,
-        summer_only=not args.all_months,
-        dry_run=args.dry_run,
-    )
-    print(json.dumps(res, indent=2))
+    results: List[Dict[str, Any]] = []
+
+    for scene_date in sorted(scenes_by_date.keys()):
+        day_items = scenes_by_date[scene_date]
+        scene_ids = [item["scene_id"] for item in day_items]
+        sensors = sorted({item.get("spacecraft", "UNKNOWN") for item in day_items})
+        sensor_label = "+".join(sensors)
+
+        prefix = f"raw/satellite/scene_{scene_date}"
+        meta_key = f"{prefix}/metadata.json"
+
+        try:
+            if not dry_run and not force and _s3_key_exists(s3, bucket, meta_key):
+                results.append({
+                    "scene_date": scene_date,
+                    "status": "already_exists",
+                    "scene_ids": scene_ids,
+                })
+                continue
+
+            # รวมภาพทั้งหมดในวันเดียวกันเป็นภาพเดียว (Mosaic)
+            next_day = ee.Date(scene_date).advance(1, "day")
+            day_col = col.filterDate(scene_date, next_day)
+            mosaic_img = day_col.mosaic()
+
+            # คำนวณเปอร์เซ็นต์เมฆในเขตหลักสี่ของภาพรวมวันนั้น
+            qa = mosaic_img.select("QA_PIXEL")
+            cloud_img = qa.bitwiseAnd(30).neq(0)
+            cloud_stat = cloud_img.reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=roi,
+                scale=SCALE,
+                crs=CRS,
+                maxPixels=1e7,
+            ).getInfo()
+
+            cloud_val = cloud_stat.get("QA_PIXEL")
+            cloud_pct = round(float(cloud_val) * 100.0, 2) if cloud_val is not None else 100.0
+
+            # ด่านคัดกรองที่ 1: เมฆเกินเกณฑ์
+            if cloud_pct > max_cloud_pct:
+                reason = f"cloud_pct ({cloud_pct}%) exceeds max_cloud_pct ({max_cloud_pct}%)"
+                if not dry_run:
+                    _write_skip_record(
+                        s3, bucket, scene_date, reason,
+                        {"cloud_pct": cloud_pct, "scene_ids": scene_ids}
+                    )
+                results.append({
+                    "scene_date": scene_date,
+                    "status": "skipped_cloudy",
+                    "cloud_pct": cloud_pct,
+                    "scene_ids": scene_ids,
+                })
+                continue
+
+            # สร้างชั้นข้อมูล 4 แบนด์ + สกัดตารางพิกเซล
+            stack = _build_stacked_image(mosaic_img, roi)
+            csv_text, total_pixels, valid_pixels = _generate_pixels_csv(stack, roi)
+            valid_ratio = round(valid_pixels / total_pixels, 4) if total_pixels > 0 else 0.0
+
+            # ด่านคัดกรองที่ 2: สัดส่วนพิกเซลดีต่ำกว่าเกณฑ์ขั้นต่ำ
+            if valid_ratio < min_valid_ratio:
+                reason = f"valid_ratio ({valid_ratio}) below min_valid_ratio ({min_valid_ratio})"
+                if not dry_run:
+                    _write_skip_record(
+                        s3, bucket, scene_date, reason,
+                        {"valid_ratio": valid_ratio, "cloud_pct": cloud_pct, "scene_ids": scene_ids}
+                    )
+                results.append({
+                    "scene_date": scene_date,
+                    "status": "skipped_low_valid_pixels",
+                    "valid_ratio": valid_ratio,
+                    "cloud_pct": cloud_pct,
+                    "scene_ids": scene_ids,
+                })
+                continue
+
+            metadata = {
+                "scene_date": scene_date,
+                "month": scene_date[:7],
+                "source_type": "satellite_remote_sensing",
+                "sensor": sensor_label,
+                "scene_ids": scene_ids,
+                "is_mosaic": len(scene_ids) > 1,
+                "cloud_pct": cloud_pct,
+                "valid_ratio": valid_ratio,
+                "total_pixels": total_pixels,
+                "valid_pixels": valid_pixels,
+                "crs": CRS,
+                "scale": SCALE,
+                "nodata": NODATA_VALUE,
+                "bands": ["lst_c", "ndvi", "ndbi", "cloud_mask"],
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+            if dry_run:
+                results.append({
+                    "scene_date": scene_date,
+                    "status": "dry_run_ready",
+                    "metadata": metadata,
+                })
+                continue
+
+            # ดาวน์โหลด GeoTIFF จาก GEE และอัปโหลดขึ้น S3
+            tif_url = stack.getDownloadURL({
+                "name": f"scene_{scene_date}_bands",
+                "scale": SCALE,
+                "crs": CRS,
+                "region": roi,
+                "format": "GEO_TIFF",
+            })
+            resp = requests.get(tif_url, timeout=120)
+            resp.raise_for_status()
+
+            # บันทึกครบ 3 ไฟล์ตาม Data Contract (bands.tif -> pixels.csv -> metadata.json)
+            s3.put_object(
+                Bucket=bucket,
+                Key=f"{prefix}/bands.tif",
+                Body=resp.content,
+                ContentType="image/tiff",
+            )
+            s3.put_object(
+                Bucket=bucket,
+                Key=f"{prefix}/pixels.csv",
+                Body=csv_text.encode("utf-8"),
+                ContentType="text/csv",
+            )
+            s3.put_object(
+                Bucket=bucket,
+                Key=meta_key,
+                Body=json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8"),
+                ContentType="application/json",
+            )
+
+            results.append({
+                "scene_date": scene_date,
+                "status": "ingested",
+                "cloud_pct": cloud_pct,
+                "valid_ratio": valid_ratio,
+                "valid_pixels": valid_pixels,
+                "is_mosaic": len(scene_ids) > 1,
+            })
+
+        except Exception as exc:
+            results.append({
+                "scene_date": scene_date,
+                "status": "error",
+                "error": str(exc),
+                "scene_ids": scene_ids,
+            })
+
+    return {
+        "status": "success",
+        "start_date": start_date,
+        "end_date": end_date,
+        "dry_run": dry_run,
+        "total_dates_found": len(scenes_by_date),
+        "processed_scenes": results,
+    }
