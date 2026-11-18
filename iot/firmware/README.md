@@ -39,8 +39,6 @@ iot/firmware/
 | `RTClib` | 2.1.4 | Adafruit | DS3231 |
 | `Adafruit BusIO` | 1.17.4 | Adafruit | dependency ของ RTClib |
 | `BH1750` | 1.3.0 | Christopher Laws | แสง |
-| `DHT sensor library` | 1.4.7 | Adafruit | DHT22 |
-| `Adafruit Unified Sensor` | 1.1.15 | Adafruit | dependency ของ DHT sensor library |
 | `TinyGPSPlus` | 1.0.3 | Mikal Hart | GPS NEO-8M |
 
 `WiFi`, `WebServer`, `DNSServer`, `Preferences`, `SD_MMC` มากับ ESP32 core แล้ว
@@ -186,6 +184,7 @@ iot/firmware/
 
 | Tag | เมื่อไร | ดูอะไร |
 |---|---|---|
+| `[BOOT]` | ตอนบูต | เหตุที่รีบูตครั้งก่อน (`POWERON`, `PANIC`, `INT_WDT`, `TASK_WDT`, `BROWNOUT` …) + เวลาที่ session ก่อนรันได้และ heap ต่ำสุด — จดลง `/boot_log.csv` บน SD ด้วย |
 | `[CFG]` | ตอนบูต | ค่าที่ใช้จริง (หลังรวม NVS) เช่น `MIC_OFFSET=123.20dB` |
 | `[INFO]` | ทั่วไป | ขั้นบูต, `Recording: /20261117/14/audio_....wav`, `Recording complete` (ขนาด / ความยาว / dropped blocks) |
 | `[STAT]` | ทุก 10 s | `Heap` (ควรนิ่ง ไม่ลดเรื่อย ๆ), `SDFree`, `SPL:..dB (A ..dBA)`, Lux, Temp, Humi, `GPS:FIX/NoFx` + ดาวเทียม + HDOP, `SD:OK/NONE`, `Rec:YES/No`, Wi-Fi และการอัป CSV (`Up:on/STOP Backlog:<แถวค้าง> OK:<ก้อนที่ส่งได้> Skip:<แถวที่ข้าม> Code:<HTTP ล่าสุด>`) |
@@ -210,7 +209,7 @@ iot/firmware/
 | จอขึ้น `--.-dB`, CSV มี `SPL_ERR` | ไมค์ไม่ส่งข้อมูล → ตรวจสาย SD 33 / WS 25 / SCK 26 / L/R ต่อ GND |
 | GPS `NoFix` นาน / `No data from GPS!` ตอนบูต | อยู่ในอาคาร (ออกที่โล่ง รอ 1–5 นาที) / ถ้าไม่มี NMEA เลย ตรวจสาย TX ของ GPS → GPIO16 |
 | `Recording complete` มี dropped blocks | SD ช้า → ใช้การ์ด Class 10 / A1 ขึ้นไป และฟอร์แมตใหม่ |
-| บอร์ดรีบูตเอง | ดู log ก่อนรีบูต: `task_wdt` = task ค้าง, `Brownout` = ไฟไม่พอ (ใช้สาย/พาวเวอร์แบงก์ที่จ่ายได้ ≥ 1 A) |
+| บอร์ดรีบูตเอง | เปิด `/boot_log.csv` บน SD (หรือบรรทัด `[BOOT]` ใน Serial): `TASK_WDT` = task ค้าง, `INT_WDT` = ปิด interrupt นานเกิน (เดิมเกิดจากไลบรารี DHT ตอนนี้อ่าน DHT22 เองแล้ว), `PANIC` = crash (ดู backtrace ใน Serial), `BROWNOUT` = ไฟไม่พอ (ใช้สาย/พาวเวอร์แบงก์ที่จ่ายได้ ≥ 1 A) |
 | กด BOOT แล้วไม่เข้า Setup Mode | ต้องกด**หลัง**ปล่อย reset และตอนจอขึ้น `Hold BOOT button` ค้าง ~2 วินาที |
 | มือถือไม่เด้งหน้าตั้งค่า | ปิด mobile data ชั่วคราว แล้วเปิด `http://192.168.4.1` เอง |
 \n
@@ -242,6 +241,7 @@ iot/firmware/
 |---|---|
 | `<csv>.idx` | cursor `byte_offset,last_record_id` = ส่งถึงไหนแล้ว (เขียน `.idx.tmp` แล้ว rename) ขยับเมื่อได้ 200 เท่านั้น |
 | `/upload_skipped.csv` | ช่วงที่ไม่ได้ส่ง: `csv_path,start_byte,end_byte,lines,http_code,reason` (400/403, แถวเสีย, header ไม่ตรง) |
+| `/boot_log.csv` | ไม่ใช่ของ uploader: 1 บรรทัดต่อการบูต `session,datetime,reset_code,reset_reason,prev_uptime_s,prev_min_heap` ไว้ดูว่าเครื่องรีบูตเพราะอะไร (`prev_*` = 0 หลังเสียบไฟใหม่) |
 
 **ผลตอบกลับ:** 200 = ขยับ cursor · 400/403 = ข้ามก้อน + จดลง `/upload_skipped.csv` · 413 = ลดก้อนครึ่งหนึ่ง · 429/5xx/timeout = รอ 5 → 60 s แล้วส่งก้อนเดิม · 401 หรือ 404 ฯลฯ = **หยุดอัปจนรีบูต** (`Up:STOP` ใน `[STAT]`) แก้ token/URL แล้วรีบูต
 

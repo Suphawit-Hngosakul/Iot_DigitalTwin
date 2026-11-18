@@ -23,6 +23,13 @@ bool createCSVLog();
 // treats it as "still growing": only complete lines are sent.
 void csvActivePath(char *out, size_t len);
 
+// Append one line to "/boot_log.csv" (created with a header): why the board
+// restarted, so reboots in the field can be explained without a Serial cable.
+// Columns: session,datetime,reset_code,reset_reason,prev_uptime_s,prev_min_heap
+// (prev_* = 0 when unknown, e.g. after a power-on). No card = nothing written.
+void appendBootLog(uint32_t session, int resetCode, const char *resetReason,
+                   uint32_t prevUptimeSec, uint32_t prevMinHeap);
+
 // Core 0: WAV recording + SPL compute + CSV logging + SD health/remount.
 void sdProcessTask(void *parameter);
 
