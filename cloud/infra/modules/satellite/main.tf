@@ -121,3 +121,25 @@ output "layer_arn" {
   description = "ARN of the GEE Lambda Layer"
   value       = aws_lambda_layer_version.gee.arn
 }
+
+# 5. EventBridge Monthly Schedule (รันทุกวันที่ 1 ของเดือน เวลา 02:00 UTC / 09:00 น. เวลาไทย)
+resource "aws_cloudwatch_event_rule" "satellite_monthly" {
+  name                = "${local.function_name}-monthly"
+  description         = "Trigger Landsat 8/9 ingest and catalog update monthly"
+  schedule_expression = "cron(0 2 1 * ? *)"
+}
+
+resource "aws_cloudwatch_event_target" "satellite_monthly" {
+  rule      = aws_cloudwatch_event_rule.satellite_monthly.name
+  target_id = "lambda-satellite-ingest"
+  arn       = aws_lambda_function.satellite.arn
+  input     = jsonencode({ mode = "ingest" })
+}
+
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.satellite.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.satellite_monthly.arn
+}
