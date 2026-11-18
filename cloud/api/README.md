@@ -30,6 +30,9 @@ endpoint ดาวเทียม `/layers`, `/grid`, `/analytics/{name}` ทำ
 
 ## ทดสอบ
 
+หน้าทดสอบบนเบราว์เซอร์ (มีแผนที่ + โหมดข้อมูลตัวอย่าง): เปิด `tester/index.html` ดูวิธีใช้ที่ `tester/README.md`
+
+
 ```bash
 cd cloud/api
 pip install -r requirements-dev.txt
