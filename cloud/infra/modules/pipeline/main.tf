@@ -135,10 +135,9 @@ resource "aws_scheduler_schedule" "hourly" {
     arn      = aws_sfn_state_machine.pipeline.arn
     role_arn = var.role_arn
     # <aws.scheduler.scheduled-time> -> PlanBatches derives hour H from it.
-    input = jsonencode({
-      mode           = "normal"
-      scheduled_time = "<aws.scheduler.scheduled-time>"
-    })
+    # Literal string, not jsonencode(): jsonencode escapes < > as < >
+    # and the Scheduler only substitutes the unescaped placeholder.
+    input = "{\"mode\":\"normal\",\"scheduled_time\":\"<aws.scheduler.scheduled-time>\"}"
 
     retry_policy {
       maximum_retry_attempts = 0
