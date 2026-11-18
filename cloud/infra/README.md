@@ -13,7 +13,7 @@ IaC ของทุกอย่างใน `cloud/` ด้วย **Terraform/Op
 | `storage` | 01 | #9 | S3 bucket (block public, SSE-S3, BucketOwnerEnforced) |
 | `ingest` | 20 | #9 | Lambda `iot-dt-ingest` (Py3.12, LabRole) + HTTP API `POST /ingest` + log 14 วัน |
 | `relay` | 10 | #7 | EC2 t3.micro + Elastic IP + SG port 8080: รับ HTTP จากบอร์ด ส่งต่อ HTTPS ไป ingest (`cloud/relay/`) ปิดได้ด้วย `relay_enabled = false` |
-
+| `satellite` | 50 | #25, #27 | Lambda `iot-dt-satellite-ingest` (Py3.12 + GEE Layer, WIF) + EventBridge ตั้งเวลาดึงข้อมูลรายเดือน (`cron(0 2 1 * ? *)`) |
 ```bash
 aws s3 mb s3://iot-dt-<account-id> --region us-east-1   # สร้าง bucket เองก่อน (ดูด้านล่าง)
 cp terraform.tfvars.example terraform.tfvars   # ใส่ค่าจริง
