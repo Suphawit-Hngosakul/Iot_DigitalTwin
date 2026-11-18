@@ -110,7 +110,7 @@
 #define PRESIGN_URL ""  // [setup] https://.../presign
 #endif
 #ifndef WSS_URL
-#define WSS_URL ""      // [setup] wss://<hub>/device
+#define WSS_URL ""      // [setup] ws://<eip>:8081/device (plain ws://, D22)
 #endif
 
 // Device token for the server: secrets.h only (never in NVS / Setup page)
@@ -133,6 +133,21 @@
 #define UPLOAD_PARTIAL_MS      300000  // file being written: send < full chunk after this long
 #define UPLOAD_POLL_MS         5000    // wait when WiFi / SD is not ready
 #define UPLOAD_ACTIVE_POLL_MS  30000   // wait for new rows when everything is sent
+
+// =============================================================================
+//  Realtime to the hub  (issue #6, spec 10 §5, D22) — see rt_client.h
+//  Plain ws:// (no TLS) to the hub on the relay EC2: settings.wssUrl.
+// =============================================================================
+
+#define RT_INTERVAL_MS        2000    // one "reading" message every ...
+#define RT_BACKOFF_MIN_MS     2000    // reconnect: doubles up to NET_BACKOFF_MAX_MS
+#define RT_CONNECT_TIMEOUT_MS 5000    // TCP connect + upgrade reply
+#define RT_IDLE_TIMEOUT_MS    60000   // nothing from the hub (it pings every 20 s) -> reconnect
+
+// Sent in "hello" (spec 01 §3). Override in secrets.h if you like.
+#ifndef FW_VERSION
+#define FW_VERSION "sp2 " __DATE__
+#endif
 
 // =============================================================================
 //  Audio Recording (SD WAV)
@@ -209,6 +224,7 @@
 #define STACK_OLED 4096 // board: ~2.2 KB used
 #define STACK_NET 4096   // board: ~1.7 KB used
 #define STACK_UPLOAD 8192 // TLS handshake runs on this stack (spike #4: ~5.3 KB used)
+#define STACK_RT 4096     // rtTask: buffers are static; check [STACK] rtTask on the board
 
 // =============================================================================
 //  OLED

@@ -1,0 +1,4 @@
+# สำหรับรันเทสต์ในเครื่องเท่านั้น (Lambda ใช้ boto3 ที่มากับ runtime, ee/google-auth มาจาก layer)
+# เทสต์ไม่เรียก GEE/AWS จริง: conftest.py ใส่ module ee ปลอมไว้ และ S3 เป็นของปลอมในหน่วยความจำ
+boto3
+pytest

@@ -139,6 +139,27 @@ void csvActivePath(char *out, size_t len) {
   snprintf(out, len, "%s", csvFileName);
 }
 
+static const char BOOT_LOG[] = "/boot_log.csv";
+
+void appendBootLog(uint32_t session, int resetCode, const char *resetReason,
+                   uint32_t prevUptimeSec, uint32_t prevMinHeap) {
+  if (!sdAvailable) return;
+  char dt[DATETIME_BUF_SIZE];
+  getDateTimeStr(dt, sizeof(dt));
+
+  MutexLock lock(sdMutex);
+  bool isNew = !SD_MMC.exists(BOOT_LOG);
+  File f = SD_MMC.open(BOOT_LOG, FILE_APPEND);
+  if (!f) {
+    LOG("WARN", "Cannot write %s", BOOT_LOG);
+    return;
+  }
+  if (isNew) f.print("session,datetime,reset_code,reset_reason,prev_uptime_s,prev_min_heap\n");
+  f.printf("%lu,%s,%d,%s,%lu,%lu\n", (unsigned long)session, dt, resetCode,
+           resetReason, (unsigned long)prevUptimeSec, (unsigned long)prevMinHeap);
+  f.close();
+}
+
 // Reopen the CSV for append after an SD remount. Caller must hold sdMutex.
 static void reopenCSVLog() {
   if (csvFile) csvFile.close();
@@ -220,6 +241,12 @@ static void appendCSVRow(float splA, float splZ, bool splOk) {
   csvFile.flush();
   if (n == 0) sdErrorCount++;
   else        sdErrorCount = 0;
+}
+
+
+void csvStatus(uint32_t &recordId, uint32_t &sdErrors) {
+  recordId = csvRecordId;    // 32-bit reads: atomic on the ESP32
+  sdErrors = sdErrorCount;
 }
 
 

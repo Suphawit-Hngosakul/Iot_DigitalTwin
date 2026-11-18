@@ -1,9 +1,25 @@
+"""Landsat 8/9 -> S3 raw/satellite/ (issue #27, spec 50 §3-4).
+
+Auth: Workload Identity Federation, same as cloud/satellite/test_lambda (#25).
+Env (set by cloud/infra/modules/satellite):
+    GEE_WIF_CONFIG   external_account JSON built from Terraform var gee_wif
+    GEE_PROJECT      Google Cloud project that owns the assets
+    GEE_ASSETS       AOI asset (FeatureCollection), e.g. .../laksi_boundary
+    DATA_BUCKET      data lake bucket
+    MAX_CLOUD_PCT    skip a date with more cloud than this in the AOI (default 40)
+    MIN_VALID_RATIO  skip a date with fewer clear pixels than this (default 0.15)
+"""
+
+from __future__ import annotations
+
+import calendar
 import csv
 import io
 import json
+import math
 import os
-from datetime import datetime, timezone
-from typing import Any, Dict, List
+from datetime import date, datetime, timezone
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import boto3
 import ee
@@ -12,13 +28,20 @@ from botocore.exceptions import ClientError
 from google.auth import aws
 
 # ค่าคงที่มาตรฐานอ้างอิงจาก spike26, grid.py และ satellite_schema.py
+# ORIGIN_X/Y ต้องเท่ากับ cloud/pipeline/common/grid.py เสมอ (ขอบพิกเซล Landsat อยู่ที่ ...15 m)
+# ถ้าแก้ที่หนึ่งต้องแก้อีกที่ด้วย ไม่เช่นนั้นพิกเซลจะไม่ตรงกริด 90 m (D11)
 CRS = "EPSG:32647"
 SCALE = 30
 ORIGIN_X = 660015.0
 ORIGIN_Y = 1545015.0
+# ใช้ crsTransform แทน scale ทุกครั้งที่ reduce/download: ถ้าส่งแค่ crs + scale
+# GEE จะวางพิกเซลบน lattice ที่เริ่มจาก 0 ของ UTM (ขอบ ...00/...30) แล้ว resample เลื่อน 15 m
 CRS_TRANSFORM = [SCALE, 0, ORIGIN_X, 0, -SCALE, ORIGIN_Y]
 NODATA_VALUE = -9999.0
 SEASON_MONTHS = (3, 5)
+DEFAULT_MAX_CLOUD_PCT = 40.0     # spec 50 §5
+DEFAULT_MIN_VALID_RATIO = 0.15
+PIXEL_COLUMNS = ["x", "y", "lon", "lat", "lst_c", "ndvi", "ndbi"]
 
 _EE_INITIALIZED = False
 
@@ -29,9 +52,9 @@ def init_ee() -> None:
     if _EE_INITIALIZED:
         return
 
-    config_path = os.path.join(os.path.dirname(__file__), "gee-wif-config.json")
-    with open(config_path, "r", encoding="utf-8") as f:
-        info = json.load(f)
+    # ค่า WIF มาจาก Terraform var gee_wif (เหมือน test Lambda #25) ไม่มีไฟล์ config ใน repo
+    # ใน Lambda google-auth อ่าน AWS_ACCESS_KEY_ID / AWS_SESSION_TOKEN / AWS_REGION จาก env
+    info = json.loads(os.environ["GEE_WIF_CONFIG"])
 
     credentials = aws.Credentials.from_info(
         info,
@@ -40,17 +63,63 @@ def init_ee() -> None:
             "https://www.googleapis.com/auth/cloud-platform",
         ],
     )
-    project_id = os.environ.get("GEE_PROJECT", "turnkey-tribute-511903-t6")
+    project_id = os.environ["GEE_PROJECT"]
     ee.Initialize(credentials, project=project_id)
     _EE_INITIALIZED = True
 
 
+def env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, "")
+    return float(raw) if raw.strip() else default
+
+
 def _s3_key_exists(s3_client: Any, bucket: str, key: str) -> bool:
+    """True/False ตามที่มีไฟล์จริง; error อื่น (เช่น 403 สิทธิ์ผิด) ให้ raise ไม่ใช่ถือว่าไม่มีไฟล์"""
     try:
         s3_client.head_object(Bucket=bucket, Key=key)
         return True
-    except ClientError:
+    except ClientError as exc:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        if code in ("404", "NoSuchKey", "NotFound"):
+            return False
+        raise
+
+
+def _read_json(s3_client: Any, bucket: str, key: str) -> Optional[Dict[str, Any]]:
+    if not _s3_key_exists(s3_client, bucket, key):
+        return None
+    body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8")
+    return json.loads(body)
+
+
+def pixel_center(x: float, y: float) -> Tuple[float, float]:
+    """ปัดพิกัดของพิกเซล (มุมบนซ้ายหรือจุดกลาง) ให้เป็นจุดกลางพิกเซลบน lattice ของ Landsat"""
+    col = math.floor((x - ORIGIN_X) / SCALE + 1e-6)
+    row = math.floor((ORIGIN_Y - y) / SCALE + 1e-6)
+    return ORIGIN_X + (col + 0.5) * SCALE, ORIGIN_Y - (row + 0.5) * SCALE
+
+
+def season_period(year: int) -> str:
+    m0, m1 = SEASON_MONTHS
+    return f"season_{year}_{m0:02d}-{m1:02d}"
+
+
+def season_years(dates: Iterable[str]) -> List[int]:
+    """ปีของ composite หน้าร้อนที่วันที่เหล่านี้ตกอยู่ในช่วง (ใช้ตัดสินว่าต้องสร้าง composite ใหม่)"""
+    m0, m1 = SEASON_MONTHS
+    years: Set[int] = set()
+    for d in dates:
+        dd = date.fromisoformat(d)
+        if m0 <= dd.month <= m1:
+            years.add(dd.year)
+    return sorted(years)
+
+
+def composite_is_current(existing_meta: Optional[Dict[str, Any]], distinct_dates: List[str]) -> bool:
+    """composite เดิมใช้ชุดวันที่เดียวกันหรือไม่ (ต่าง = มีฉากใหม่ในฤดู ต้องสร้างใหม่)"""
+    if not existing_meta:
         return False
+    return sorted(existing_meta.get("distinct_dates", [])) == sorted(distinct_dates)
 
 
 def _prep_clear_indices(img: ee.Image) -> ee.Image:
@@ -104,34 +173,46 @@ def _generate_pixels_csv(
     stack: ee.Image, roi: ee.Geometry, extra_col: str = "cloud_mask"
 ) -> tuple[str, int, int]:
     """สกัดค่าพิกเซลทั้งหมดใน ROI ออกมาเป็น CSV พร้อมนับจำนวนพิกเซล"""
-    coords = ee.Image.pixelCoordinates(CRS).clip(roi).unmask(NODATA_VALUE)
+    coords = (
+        ee.Image.pixelCoordinates(CRS)
+        .addBands(ee.Image.pixelLonLat())
+        .clip(roi)
+        .unmask(NODATA_VALUE)
+    )
     combined = coords.addBands(stack)
 
     reduced = combined.reduceRegion(
         reducer=ee.Reducer.toList(),
         geometry=roi,
-        scale=SCALE,
         crs=CRS,
+        crsTransform=CRS_TRANSFORM,
         maxPixels=1e7,
     ).getInfo()
+    return pixels_to_csv(reduced, extra_col)
 
+
+def pixels_to_csv(reduced: Dict[str, List[Any]], extra_col: str) -> Tuple[str, int, int]:
+    """แปลงผล reduceRegion(toList) เป็น pixels.csv (x, y = จุดกลางพิกเซล EPSG:32647; lon, lat = WGS84)"""
     xs = reduced.get("x", [])
     ys = reduced.get("y", [])
+    lons = reduced.get("longitude", [])
+    lats = reduced.get("latitude", [])
     lsts = reduced.get("lst_c", [])
     ndvis = reduced.get("ndvi", [])
     ndbis = reduced.get("ndbi", [])
     extras = reduced.get(extra_col, [])
 
     output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["x", "y", "lst_c", "ndvi", "ndbi", extra_col])
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(PIXEL_COLUMNS + [extra_col])
 
     total_pixels = 0
     valid_pixels = 0
 
-    for x, y, lst_v, ndvi_v, ndbi_v, ext_v in zip(xs, ys, lsts, ndvis, ndbis, extras):
+    for x, y, lon, lat, lst_v, ndvi_v, ndbi_v, ext_v in zip(xs, ys, lons, lats, lsts, ndvis, ndbis, extras):
         if x == NODATA_VALUE or y == NODATA_VALUE:
             continue
+        cx, cy = pixel_center(float(x), float(y))
 
         total_pixels += 1
         if extra_col == "cloud_mask":
@@ -143,8 +224,10 @@ def _generate_pixels_csv(
             valid_pixels += 1
 
         writer.writerow([
-            round(float(x), 2),
-            round(float(y), 2),
+            round(cx, 2),
+            round(cy, 2),
+            round(float(lon), 6),
+            round(float(lat), 6),
             round(float(lst_v), 4) if lst_v != NODATA_VALUE else NODATA_VALUE,
             round(float(ndvi_v), 4) if ndvi_v != NODATA_VALUE else NODATA_VALUE,
             round(float(ndbi_v), 4) if ndbi_v != NODATA_VALUE else NODATA_VALUE,
@@ -164,11 +247,17 @@ def _upload_bundle(
     csv_text: str,
     metadata: Dict[str, Any],
 ) -> None:
-    """ดาวน์โหลด GeoTIFF จาก GEE และอัปโหลดครบชุด (bands.tif, pixels.csv, metadata.json, _COMPLETE)"""
+    """ดาวน์โหลด GeoTIFF จาก GEE และอัปโหลดครบชุด (bands.tif, pixels.csv, metadata.json, _COMPLETE)
+
+    ลบ _COMPLETE เดิมก่อน (กรณีเขียนทับ เช่น composite ที่มีฉากใหม่ หรือ force) เพื่อไม่ให้
+    pipeline อ่านชุดไฟล์ที่เขียนไม่ครบ แล้วเขียน _COMPLETE ใหม่เป็นไฟล์สุดท้าย
+    """
+    s3_client.delete_object(Bucket=bucket, Key=f"{prefix}/_COMPLETE")
+
     tif_url = stack.getDownloadURL({
         "name": tif_name,
-        "scale": SCALE,
         "crs": CRS,
+        "crs_transform": CRS_TRANSFORM,
         "region": roi,
         "format": "GEO_TIFF",
     })
@@ -201,6 +290,10 @@ def _upload_bundle(
     )
 
 
+def skip_key(scene_date: str) -> str:
+    return f"raw/satellite/skipped/{scene_date}.json"
+
+
 def _write_skip_record(
     s3_client: Any,
     bucket: str,
@@ -218,7 +311,7 @@ def _write_skip_record(
     }
     s3_client.put_object(
         Bucket=bucket,
-        Key=f"raw/satellite/skipped/{scene_date}.json",
+        Key=skip_key(scene_date),
         Body=json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"),
         ContentType="application/json",
     )
@@ -229,19 +322,21 @@ def run_ingest(
     end_date: str,
     dry_run: bool = False,
     force: bool = False,
-    max_cloud_pct: float = 75.0,
-    min_valid_ratio: float = 0.15,
+    max_cloud_pct: float = DEFAULT_MAX_CLOUD_PCT,
+    min_valid_ratio: float = DEFAULT_MIN_VALID_RATIO,
 ) -> Dict[str, Any]:
-    """ดึงข้อมูล Landsat 8/9 รายฉาก (รวมภาพวันเดียวกัน) และบันทึกลง S3"""
+    """ดึงข้อมูล Landsat 8/9 รายฉาก (รวมภาพวันเดียวกัน) และบันทึกลง S3
+
+    ข้ามวันที่มี _COMPLETE แล้ว และวันที่เคยถูก skip (มี raw/satellite/skipped/<date>.json)
+    เว้นแต่ force=True (เช่น เปลี่ยนเกณฑ์เมฆแล้วอยากประเมินใหม่)
+    """
     init_ee()
 
     bucket = os.environ.get("DATA_BUCKET")
     if not bucket and not dry_run:
         raise ValueError("Missing DATA_BUCKET environment variable")
 
-    asset_path = os.environ.get(
-        "GEE_ASSETS", "projects/turnkey-tribute-511903-t6/assets/laksi_boundary"
-    )
+    asset_path = os.environ["GEE_ASSETS"]
     roi = ee.FeatureCollection(asset_path).geometry()
     s3 = boto3.client("s3") if not dry_run else None
 
@@ -288,6 +383,13 @@ def run_ingest(
                     "scene_ids": scene_ids,
                 })
                 continue
+            if not dry_run and not force and _s3_key_exists(s3, bucket, skip_key(scene_date)):
+                results.append({
+                    "scene_date": scene_date,
+                    "status": "already_skipped",
+                    "scene_ids": scene_ids,
+                })
+                continue
 
             next_day = ee.Date(scene_date).advance(1, "day")
             mosaic_img = col.filterDate(scene_date, next_day).mosaic()
@@ -296,8 +398,8 @@ def run_ingest(
             cloud_stat = cloud_img.reduceRegion(
                 reducer=ee.Reducer.mean(),
                 geometry=roi,
-                scale=SCALE,
                 crs=CRS,
+                crsTransform=CRS_TRANSFORM,
                 maxPixels=1e7,
             ).getInfo()
 
@@ -356,8 +458,13 @@ def run_ingest(
                 "valid_pixels": valid_pixels,
                 "crs": CRS,
                 "scale": SCALE,
+                "crs_transform": CRS_TRANSFORM,
+                "pixel_xy": "pixel_center",
                 "nodata": NODATA_VALUE,
                 "bands": ["lst_c", "ndvi", "ndbi", "cloud_mask"],
+                "cloud_mask": "1 = clear (QA_PIXEL bits 1-4 all 0), 0 = cloud/shadow",
+                "max_cloud_pct": max_cloud_pct,
+                "min_valid_ratio": min_valid_ratio,
                 "processed_at": datetime.now(timezone.utc).isoformat(),
             }
 
@@ -373,6 +480,8 @@ def run_ingest(
                 s3, bucket, prefix, stack, roi,
                 f"scene_{scene_date}_bands", csv_text, metadata
             )
+            # วันที่เคยถูก skip แล้วผ่านเมื่อรัน force (เช่น ปรับเกณฑ์) ไม่ต้องค้างใน skipped/ อีก
+            s3.delete_object(Bucket=bucket, Key=skip_key(scene_date))
 
             results.append({
                 "scene_date": scene_date,
@@ -391,8 +500,10 @@ def run_ingest(
                 "scene_ids": scene_ids,
             })
 
+    n_errors = sum(1 for r in results if r["status"] == "error")
     return {
-        "status": "success",
+        "status": "error" if n_errors else "success",
+        "errors": n_errors,
         "mode": "ingest",
         "start_date": start_date,
         "end_date": end_date,
@@ -405,28 +516,27 @@ def run_ingest(
 def build_seasonal_composite(
     year: int, dry_run: bool = False, force: bool = False
 ) -> Dict[str, Any]:
-    """สร้าง Seasonal Composite หน้าร้อน (เดือน 3-5) พร้อมนับจำนวนพิกเซลดีรายจุด (n_valid)"""
+    """สร้าง Seasonal Composite หน้าร้อน (เดือน 3-5) พร้อมนับจำนวนพิกเซลดีรายจุด (n_valid)
+
+    มี composite เดิมแล้ว: สร้างใหม่เฉพาะเมื่อชุดวันที่ของฉากในฤดูเปลี่ยน (มีฉากใหม่) หรือ force=True
+    (spec 50 §3: composite รันใหม่ทุกวันที่มีฉากใหม่ในช่วงฤดู และหยุดเองเมื่อพ้นฤดู)
+    """
     init_ee()
 
     bucket = os.environ.get("DATA_BUCKET")
     if not bucket and not dry_run:
         raise ValueError("Missing DATA_BUCKET environment variable")
 
-    asset_path = os.environ.get(
-        "GEE_ASSETS", "projects/turnkey-tribute-511903-t6/assets/laksi_boundary"
-    )
+    asset_path = os.environ["GEE_ASSETS"]
     roi = ee.FeatureCollection(asset_path).geometry()
     s3 = boto3.client("s3") if not dry_run else None
 
     m0, m1 = SEASON_MONTHS
-    period = f"season_{year}_{m0:02d}-{m1:02d}"
+    period = season_period(year)
     prefix = f"raw/satellite/{period}"
 
-    if not dry_run and not force and _s3_key_exists(s3, bucket, f"{prefix}/_COMPLETE"):
-        return {"status": "success", "mode": "composite", "period": period, "result": "already_exists"}
-
     start_str = f"{year}-{m0:02d}-01"
-    end_str = f"{year}-{m1 + 1:02d}-01"
+    end_str = f"{year + 1}-01-01" if m1 == 12 else f"{year}-{m1 + 1:02d}-01"
 
     col = (
         ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
@@ -459,6 +569,18 @@ def build_seasonal_composite(
     distinct_dates = sorted({f["properties"]["date_str"] for f in meta_feats})
     sensors = sorted({f["properties"].get("spacecraft", "UNKNOWN") for f in meta_feats})
 
+    replaced = not dry_run and _s3_key_exists(s3, bucket, f"{prefix}/_COMPLETE")
+    if replaced and not force:
+        existing = _read_json(s3, bucket, f"{prefix}/metadata.json")
+        if composite_is_current(existing, distinct_dates):
+            return {
+                "status": "success",
+                "mode": "composite",
+                "period": period,
+                "result": "up_to_date",
+                "distinct_dates": len(distinct_dates),
+            }
+
     prepped = col.map(_prep_clear_indices)
     median_img = prepped.median()
     n_valid_img = prepped.select("lst_c").count().toFloat().rename("n_valid")
@@ -480,7 +602,7 @@ def build_seasonal_composite(
         "period_type": "season",
         "year": year,
         "date_start": f"{year}-{m0:02d}-01",
-        "date_end": f"{year}-{m1:02d}-31",
+        "date_end": f"{year}-{m1:02d}-{calendar.monthrange(year, m1)[1]:02d}",
         "source_type": "satellite_seasonal_composite",
         "reducer": "median",
         "sensor": "+".join(sensors),
@@ -491,6 +613,8 @@ def build_seasonal_composite(
         "valid_pixels": valid_pixels,
         "crs": CRS,
         "scale": SCALE,
+        "crs_transform": CRS_TRANSFORM,
+        "pixel_xy": "pixel_center",
         "nodata": NODATA_VALUE,
         "bands": ["lst_c", "ndvi", "ndbi", "n_valid"],
         "processed_at": datetime.now(timezone.utc).isoformat(),
@@ -511,7 +635,7 @@ def build_seasonal_composite(
         "status": "success",
         "mode": "composite",
         "period": period,
-        "result": "created",
+        "result": "rebuilt" if replaced else "created",
         "distinct_dates": len(distinct_dates),
         "valid_ratio": valid_ratio,
         "valid_pixels": valid_pixels,

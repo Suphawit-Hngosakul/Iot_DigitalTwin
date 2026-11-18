@@ -58,6 +58,11 @@ volatile uint32_t uploadRowsSkipped = 0;
 volatile int16_t  uploadLastCode    = 0;
 volatile bool     uploadStopped     = false;
 
+volatile bool     rtConnected  = false;
+volatile uint32_t rtSent       = 0;
+volatile uint32_t rtReconnects = 0;
+volatile bool     rtStopped    = false;
+
 
 // =============================================================================
 //  Audio Pool

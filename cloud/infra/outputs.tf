@@ -12,17 +12,57 @@ output "relay_url" {
   value       = var.relay_enabled ? module.relay[0].relay_url : null
 }
 
-output "satellite_function_name" {
-  description = "Name of the GEE test Lambda function"
-  value       = module.satellite.function_name
+output "hub_device_url" {
+  description = "Put in the firmware as wssUrl (plain ws://, D22)"
+  value       = var.relay_enabled ? module.relay[0].hub_device_url : null
 }
 
-output "satellite_function_arn" {
-  description = "ARN of the GEE test Lambda function"
-  value       = module.satellite.function_arn
+output "hub_live_url" {
+  description = "For live.html / the web: <this>?device=all"
+  value       = var.relay_enabled ? module.relay[0].hub_live_url : null
+}
+
+output "pipeline_state_machine_arn" {
+  description = "aws stepfunctions start-execution --state-machine-arn <this> --input '{\"batch_ids\":[...]}'"
+  value       = module.pipeline.state_machine_arn
+}
+
+output "athena_database" {
+  description = "ATHENA_DB for the API (#18)"
+  value       = module.catalog.database_name
+}
+
+output "athena_workgroup" {
+  description = "ATHENA_WORKGROUP for the API (#18); pick it in the Athena console before querying"
+  value       = module.catalog.workgroup_name
+}
+
+output "athena_output" {
+  description = "ATHENA_OUTPUT for the API (#18)"
+  value       = module.catalog.results_location
+}
+
+output "catalog_device_ids" {
+  description = "device_id values in the partition projection (from devices.csv)"
+  value       = module.catalog.device_ids
+}
+
+output "api_url" {
+  description = "Base URL of the web API (#18), e.g. <this>/devices"
+  value       = module.api.api_url
+}
+
+output "satellite_function_name" {
+  description = "GEE test Lambda (#25), null when satellite_enabled = false"
+  value       = one(module.satellite[*].function_name)
 }
 
 output "gee_layer_arn" {
-  description = "ARN of the GEE Lambda Layer"
-  value       = module.satellite.layer_arn
+  description = "GEE Lambda layer ARN, reuse for satellite_ingest (#27); null when satellite_enabled = false"
+  value       = one(module.satellite[*].layer_arn)
+}
+
+output "satellite_ingest_function_name" {
+  description = "satellite_ingest Lambda (#27), null when satellite_enabled = false"
+  value       = one(module.satellite[*].ingest_function_name)
 }

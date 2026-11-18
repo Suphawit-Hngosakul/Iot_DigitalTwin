@@ -40,7 +40,7 @@ Partition: `device_id`, `date` (อยู่ใน path ไม่อยู่ใ
 | `readings_1min` | 1 นาที × 1 เครื่อง | minute_local, minute_utc, n_rows, db_spl_mean/max/min, dba_mean, temp_c_mean, humidity_pct_mean, lux_mean, lat, lon, cell_id (#29) |
 | `quality` | 1 session × 1 batch | batch_id, session, expected/received/missing/duplicate/invalid_rows, loss_rate, flag_counts (JSON) |
 
-ค่าเสียงรายนาทีใช้ mean/max/min ไปก่อน ยังไม่ใช้ Leq
+ค่าเสียงรายนาทีใช้ mean/max/min ของค่ารายวินาที ไม่ใช้ Leq
 
 ## 4. batch_id และ S3
 

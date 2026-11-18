@@ -140,6 +140,16 @@ extern volatile bool     uploadStopped;       // 401 / bad URL: stopped until re
 
 
 // =============================================================================
+//  Realtime Status  (single writer: rtTask, issue #6)
+// =============================================================================
+
+extern volatile bool     rtConnected;    // WebSocket to the hub is open
+extern volatile uint32_t rtSent;         // readings sent since boot
+extern volatile uint32_t rtReconnects;   // reconnects after the first connect
+extern volatile bool     rtStopped;      // 401 / wss:// / bad URL: stopped until reboot
+
+
+// =============================================================================
 //  Audio Pool
 //  micTask -> readyQueue -> sdProcessTask -> freeQueue
 // =============================================================================

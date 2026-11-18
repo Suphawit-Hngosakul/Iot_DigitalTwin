@@ -1,0 +1,14 @@
+[Unit]
+Description=IoT Digital Twin realtime hub (ws:// :8081 for ESP32 + web, spec 22)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/iot-dt-hub.env
+ExecStart=/opt/iot-dt-hub/venv/bin/python /opt/iot-dt-hub/hub.py
+Restart=always
+RestartSec=3
+DynamicUser=yes
+
+[Install]
+WantedBy=multi-user.target

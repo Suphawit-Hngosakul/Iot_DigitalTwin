@@ -46,7 +46,7 @@ struct RuntimeSettings {
   // Server endpoints (empty = feature off). Token: DEVICE_TOKEN in secrets.h
   char ingestUrl[SETTINGS_URL_LEN];    // https://  CSV upload (#7)
   char presignUrl[SETTINGS_URL_LEN];   // https://  WAV upload link (#20)
-  char wssUrl[SETTINGS_URL_LEN];       // wss://    realtime hub (#6)
+  char wssUrl[SETTINGS_URL_LEN];       // ws://     realtime hub (#6, D22: no TLS)
 };
 
 extern RuntimeSettings settings;
