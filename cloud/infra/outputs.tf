@@ -36,3 +36,8 @@ output "catalog_device_ids" {
   description = "device_id values in the partition projection (from devices.csv)"
   value       = module.catalog.device_ids
 }
+
+output "api_url" {
+  description = "Base URL of the web API (#18), e.g. <this>/devices"
+  value       = module.api.api_url
+}

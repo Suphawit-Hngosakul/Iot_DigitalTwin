@@ -60,3 +60,9 @@ variable "athena_bytes_scanned_cutoff" {
   type        = number
   default     = 1073741824 # 1 GiB
 }
+
+variable "api_allowed_origins" {
+  description = "CORS origins allowed to call the API (#18). [\"*\"] until the web (#35) has a domain, then e.g. [\"http://<bucket>.s3-website-us-east-1.amazonaws.com\"]."
+  type        = list(string)
+  default     = ["*"]
+}

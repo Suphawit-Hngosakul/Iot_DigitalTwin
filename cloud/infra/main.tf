@@ -66,3 +66,17 @@ module "catalog" {
   date_start           = var.catalog_date_start
   bytes_scanned_cutoff = var.athena_bytes_scanned_cutoff
 }
+
+# API for the web (spec 40 §3, #18). Reads Athena + publish markers, own HTTP API.
+module "api" {
+  source           = "./modules/api"
+  name_prefix      = var.name_prefix
+  role_arn         = data.aws_iam_role.lab.arn
+  bucket_name      = module.storage.bucket_name
+  source_dir       = "${path.root}/../api"
+  common_dir       = "${path.root}/../pipeline/common"
+  athena_database  = module.catalog.database_name
+  athena_workgroup = module.catalog.workgroup_name
+  athena_output    = module.catalog.results_location
+  allowed_origins  = var.api_allowed_origins
+}
