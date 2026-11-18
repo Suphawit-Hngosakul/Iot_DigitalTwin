@@ -9,7 +9,7 @@ def _load_function(name):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-from datetime import datetime
+from datetime import datetime, timezone
 
 import boto3
 import pytest
@@ -51,6 +51,13 @@ def put(s3, device_id, day, hour):
 def test_scheduled_time_is_thai_hour():
     # 18:05 UTC = 01:05 Thai next day -> H = 01:00
     assert pb.scheduled_hour_local("2026-11-17T18:05:00Z") == datetime(2026, 11, 18, 1)
+
+
+def test_unsubstituted_placeholder_falls_back_to_now():
+    # Scheduler left "<aws.scheduler.scheduled-time>" as-is -> use now, don't crash
+    now = datetime(2026, 11, 18, 0, 5, tzinfo=timezone.utc)   # 07:05 Thai
+    assert pb.scheduled_hour_local("<aws.scheduler.scheduled-time>", now=now) \
+        == datetime(2026, 11, 18, 7)
 
 
 def test_lookback_crosses_midnight():

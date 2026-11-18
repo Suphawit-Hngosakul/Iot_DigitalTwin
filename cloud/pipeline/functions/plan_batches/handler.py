@@ -38,7 +38,14 @@ def _client():
 
 
 def scheduled_hour_local(scheduled_time: str | None, now: datetime | None = None) -> datetime:
-    """Thai-local, naive, truncated to the hour (matches raw date=/hour=)."""
+    """Thai-local, naive, truncated to the hour (matches raw date=/hour=).
+
+    An unsubstituted Scheduler placeholder ("<aws.scheduler...>") falls back
+    to now, so a misconfigured schedule still processes data.
+    """
+    if scheduled_time and scheduled_time.startswith("<"):
+        log.warning("scheduled_time not substituted (%s); using now", scheduled_time)
+        scheduled_time = None
     if scheduled_time:
         ts = datetime.fromisoformat(scheduled_time.replace("Z", "+00:00"))
         if ts.tzinfo is None:
