@@ -1,0 +1,2 @@
+# สำหรับรันเทสต์ในเครื่องเท่านั้น ใช้ชุดเดียวกับ cloud/pipeline (moto, pyarrow, pyyaml)
+-r ../../pipeline/requirements-dev.txt

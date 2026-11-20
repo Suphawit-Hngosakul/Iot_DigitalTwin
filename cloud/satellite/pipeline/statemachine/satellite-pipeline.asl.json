@@ -1,0 +1,251 @@
+{
+  "Comment": "Satellite pipeline (spec 51 §3, D23): 1 execution = 1 batch (raw/satellite/<batch_id>/). Started by EventBridge on _COMPLETE or by hand with {\"batch_id\", \"mode\"}. Terraform fills the ARN placeholders with templatefile().",
+  "StartAt": "CheckBatch",
+  "States": {
+    "CheckBatch": {
+      "Type": "Task",
+      "Resource": "${check_batch_arn}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "AlreadyProcessed?"
+    },
+    "AlreadyProcessed?": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.check.status",
+          "StringEquals": "ALREADY_PROCESSED",
+          "Next": "StopAlreadyProcessed"
+        },
+        {
+          "Variable": "$.check.status",
+          "StringEquals": "NO_DATA",
+          "Next": "NoData"
+        },
+        {
+          "Variable": "$.check.status",
+          "StringEquals": "NEW",
+          "Next": "ValidateBatch"
+        },
+        {
+          "Variable": "$.check.status",
+          "StringEquals": "CHANGED",
+          "Next": "ValidateBatch"
+        }
+      ],
+      "Default": "InvalidInput"
+    },
+    "ValidateBatch": {
+      "Type": "Task",
+      "Resource": "${validate_batch_arn}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "IsValid?"
+    },
+    "IsValid?": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.validation.status",
+          "StringEquals": "PASS",
+          "Next": "WriteTrusted"
+        },
+        {
+          "Variable": "$.validation.status",
+          "StringEquals": "FAIL",
+          "Next": "QuarantineBatch"
+        }
+      ],
+      "Default": "NotifyFailure"
+    },
+    "QuarantineBatch": {
+      "Type": "Task",
+      "Resource": "${quarantine_batch_arn}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "Quarantined"
+    },
+    "WriteTrusted": {
+      "Type": "Task",
+      "Resource": "${write_trusted_arn}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "RenderLayers"
+    },
+    "RenderLayers": {
+      "Type": "Task",
+      "Resource": "${render_layers_arn}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "VerifyBatch"
+    },
+    "VerifyBatch": {
+      "Type": "Task",
+      "Resource": "${verify_batch_arn}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "Published"
+    },
+    "Published": {
+      "Type": "Succeed"
+    },
+    "Quarantined": {
+      "Type": "Succeed"
+    },
+    "StopAlreadyProcessed": {
+      "Type": "Succeed"
+    },
+    "NoData": {
+      "Type": "Succeed"
+    },
+    "InvalidInput": {
+      "Type": "Fail",
+      "Error": "InvalidInput",
+      "Cause": "CheckBatch returned INVALID_INPUT (bad batch_id, s3_key or mode)"
+    },
+    "NotifyFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${alert_topic_arn}",
+        "Subject": "iot-dt satellite pipeline failed",
+        "Message.$": "States.JsonToString($)"
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.notify_error",
+          "Next": "PipelineFailed"
+        }
+      ],
+      "Next": "PipelineFailed"
+    },
+    "PipelineFailed": {
+      "Type": "Fail",
+      "Error": "PipelineFailed",
+      "Cause": "A satellite pipeline step failed; details were sent to the alert topic"
+    }
+  }
+}
