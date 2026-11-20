@@ -120,7 +120,7 @@ locals {
       ["lux_mean", "double"],
       ["lat", "double"],
       ["lon", "double"],
-      ["cell_id", "string"], # null until #29
+      ["cell_id", "string"], # filled by #29 (grid.py); null when no fix or off-grid
     ]
     quality = [
       ["batch_id", "string"],

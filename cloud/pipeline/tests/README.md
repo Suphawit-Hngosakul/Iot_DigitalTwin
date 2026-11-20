@@ -92,6 +92,7 @@ python -m pytest -q
 | `test_latlon_roundtrip_and_aoi_inside_grid` | ชุมชนสุดขอบ (หลักสี่ใต้สุด, ดอนเมือง) อยู่ในกริด และแปลง lat/lon ไปกลับได้ |
 | `test_cells_in_circle_area_matches_circle` | พื้นที่รวม (น้ำหนัก × เซลล์) ของ buffer 300/500 m ต่างจาก πr² ไม่เกิน 2% |
 | `test_cells_in_circle_rejects_bad_radius` | รัศมี 0 หรือวงกลมเลยขอบกริด → error |
+| `test_pure_python_utm47n_matches_pyproj` | สูตร UTM 47N ที่เขียนเอง (ใช้บน Lambda ที่ไม่มี pyproj) ได้ค่าตรงกับ pyproj |
 
 ## test_satellite_schema.py — ดาวเทียม + ชุมชน (`common/satellite_schema.py`)
 
@@ -155,10 +156,12 @@ python -m pytest -q
 | `test_time_jump_flagged_not_dropped` | เวลากระโดด → flag `TIME_JUMP` แต่ยังเก็บแถว |
 | `test_parse_error_row_is_invalid` | แถวแปลงไม่ได้ → invalid (ไม่ทำให้ Lambda พัง) |
 | `test_quarantine_copies_files_and_reason` | คัดลอก raw ไป `quarantine/<batch_id>/` + `reason.json` โดย raw เดิมยังอยู่ |
-| `test_transform_tables` | readings_1s / readings_1min (mean/max/min ไม่มี Leq, cell_id null) / quality ถูกต้อง |
+| `test_transform_tables` | readings_1s / readings_1min (mean/max/min ไม่มี Leq, cell_id null เพราะจุด fixture อยู่นอกกริด) / quality ถูกต้อง |
 | `test_one_parquet_per_table_per_hour` | raw หลาย part ในชั่วโมงเดียว → Parquet 1 ไฟล์ต่อตาราง |
 | `test_speed_filter_nulls_jump` | จุด GPS ที่เร็วเกิน 30 km/h จากจุดก่อน → lat/lon เป็น null |
 | `test_station_uses_registry_position` | Stationary ใช้พิกัดจาก devices.csv |
+| `test_readings_1min_populates_cell_id` | readings_1min ได้ cell_id จาก GPS จุดแรกของนาที (grid.py, #29) |
+| `test_readings_1min_station_cell_id_from_registry` | Stationary ได้ cell_id จากพิกัดใน devices.csv |
 | `test_verify_publishes_then_check_says_already_processed` | Verify เขียน manifest แล้ว CheckBatch รอบถัดไปได้ ALREADY_PROCESSED, มี part ใหม่ → CHANGED |
 | `test_verify_mismatch_raises` | จำนวนแถวไม่ตรง → `VerifyMismatch` |
 | `test_count_data_lines_matches_parser` | ตัวนับบรรทัดของ Verify ตรงกับ parser (บรรทัดว่าง/BOM) |

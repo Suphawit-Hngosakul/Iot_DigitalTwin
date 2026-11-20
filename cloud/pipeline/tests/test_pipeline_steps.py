@@ -13,7 +13,7 @@ from moto import mock_aws
 pa = pytest.importorskip("pyarrow")
 import pyarrow.parquet as pq  # noqa: E402
 
-from common import batch_eval, schema  # noqa: E402
+from common import batch_eval, grid, schema  # noqa: E402
 
 
 def _load_function(name):
@@ -297,3 +297,27 @@ def test_verify_mismatch_raises(s3):
 def test_count_data_lines_matches_parser():
     body = (FIXTURES / "good.csv").read_bytes() + b"\n\n"
     assert batch_eval.count_data_lines(body) == len(batch_eval.parse_file("k", body).rows) == 4
+
+
+def test_readings_1min_populates_cell_id(s3):
+    r1 = row(1, "2026-11-16 08:30:00", Latitude="13.8850", Longitude="100.5800")
+    r2 = row(2, "2026-11-16 08:30:01", Latitude="13.8851", Longitude="100.5801")
+    put(s3, "12-1-2", to_csv([r1, r2]))
+    run_all(s3)
+
+    (m,) = read_table(s3, "readings_1min")
+    expected_cell = grid.latlon_to_cell(13.8850, 100.5800)
+    assert expected_cell is not None
+    assert m["cell_id"] == expected_cell
+
+
+def test_readings_1min_station_cell_id_from_registry(s3):
+    rows = [row(i, f"2026-11-16 08:30:0{i}", Device_Type="Stationary") for i in range(1, 4)]
+    put(s3, "12-1-3", to_csv(rows))
+    devices = [dev("IOTW-A001", "Stationary", 13.88, 100.57)]
+    run_all(s3, devices=devices)
+
+    (m,) = read_table(s3, "readings_1min")
+    expected_cell = grid.latlon_to_cell(13.88, 100.57)
+    assert expected_cell is not None
+    assert m["cell_id"] == expected_cell
