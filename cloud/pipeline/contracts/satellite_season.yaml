@@ -1,0 +1,39 @@
+# Data contract: Landsat hot-season composite pixels (spec 32, D23) — produced by satellite_ingest (spec 50)
+# raw/satellite/season_<YYYY>_03-05/pixels.csv  (median Mar-May, 1 row = 1 pixel 30 m, x/y = pixel centre EPSG:32647)
+# Levels: BLOCK = batch -> quarantine/batch/ (batch_checks) or row -> quarantine/rows/ (columns)
+#         STANDARDIZE = fixed then kept | WARN = kept, logged in the report
+source: satellite_season
+version: 1
+description: พิกเซล 30 m composite หน้าร้อน (median มี.ค.-พ.ค.) LST/NDVI/NDBI + n_valid
+format: csv
+encoding: utf-8
+key: [x, y]
+
+standardize:
+  - strip_bom_from_header
+  - trim_whitespace
+  - {rule: nodata_to_null, value: -9999, columns: [lst_c, ndvi, ndbi]}
+  - cast_types
+
+batch_checks:
+  - {rule: required_files, values: [pixels.csv, metadata.json, _COMPLETE], level: BLOCK}
+  - {rule: required_columns, level: BLOCK}
+  - {rule: row_count_min, value: 1, level: BLOCK}
+  - {rule: row_count_equals_metadata, field: total_pixels, level: BLOCK}
+  - {rule: unique_key, level: BLOCK}
+  # must equal cloud/pipeline/common/grid.py ORIGIN_X/Y (D11); otherwise pixels do not fit the 90 m grid
+  - {rule: metadata_equals, field: crs, value: "EPSG:32647", level: BLOCK}
+  - {rule: metadata_equals, field: crs_transform, value: [30, 0, 660015, 0, -30, 1545015], level: BLOCK}
+  - {rule: metadata_equals, field: period_type, value: season, level: BLOCK}
+  - {rule: metadata_min, field: valid_ratio, value: 0.15, level: BLOCK}   # = satellite_min_valid_ratio (spec 50)
+  - {rule: max_invalid_ratio, value: 0.20, level: BLOCK}
+
+columns:
+  - {name: x, type: float, unit: m, nullable: false}
+  - {name: y, type: float, unit: m, nullable: false}
+  - {name: lon, type: float, nullable: false, checks: [{rule: range, min: 97, max: 106, level: BLOCK}]}
+  - {name: lat, type: float, nullable: false, checks: [{rule: range, min: 5, max: 21, level: BLOCK}]}
+  - {name: lst_c, type: float, unit: degC, nullable: true, checks: [{rule: range, min: 0, max: 70, level: BLOCK}]}
+  - {name: ndvi, type: float, nullable: true, checks: [{rule: range, min: -1, max: 1, level: BLOCK}]}
+  - {name: ndbi, type: float, nullable: true, checks: [{rule: range, min: -1, max: 1, level: BLOCK}]}
+  - {name: n_valid, type: int, unit: images, nullable: false, checks: [{rule: min, value: 0, level: BLOCK}]}
