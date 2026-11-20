@@ -37,8 +37,8 @@ variable "pandas_layer_arn" {
 }
 
 locals {
-  # Shipped as package `common/` next to handler.py (grid.py needs pyproj -> #29).
-  common_files = ["__init__.py", "schema.py", "batch_manifest.py", "batch_eval.py", "devices.csv"]
+  # Shipped as package `common/` next to handler.py (grid.py includes pure-Python UTM 47N fallback when pyproj is absent).
+  common_files = ["__init__.py", "schema.py", "batch_manifest.py", "batch_eval.py", "devices.csv", "grid.py"]
 
   functions = {
     plan_batches     = { timeout = 60, memory = 256, layers = [], env = { LOOKBACK_HOURS = tostring(var.lookback_hours) } }

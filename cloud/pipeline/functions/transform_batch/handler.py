@@ -1,4 +1,4 @@
-"""TransformBatch Lambda (issue #15, spec 30 §4, spec 01 §4).
+"""TransformBatch Lambda (issue #15, #29, spec 30 §4, spec 01 §4).
 
 Combines every raw part of the hour into ONE Parquet file per table:
   processed/readings_1s/device_id=<id>/date=<d>/<batch_id>.parquet
@@ -8,8 +8,9 @@ Overwrites the batch's files (idempotent). Raw is not touched.
 
 Rows: duplicates and DROP-flagged rows removed (batch_eval), values nulled by
 flag (schema.clean_row). Mobile: GPS points implying > 30 km/h from the last
-accepted point are nulled. Stationary: lat/lon from devices.csv. cell_id stays
-null until #29 (D21). Needs pyarrow (Lambda layer AWS SDK for pandas).
+accepted point are nulled. Stationary: lat/lon from devices.csv. cell_id is
+assigned from lat/lon via common/grid.py (#29). Needs pyarrow (Lambda layer
+AWS SDK for pandas).
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from datetime import timedelta
 
 import boto3
 
-from common import batch_eval, schema
+from common import batch_eval, grid, schema
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
@@ -98,6 +99,8 @@ def readings_1min(recs: list[dict]) -> list[dict]:
         rs = by_min[minute]
         spl = [r["db_spl"] for r in rs if r["db_spl"] is not None]
         first_gps = next((r for r in rs if r["lat"] is not None and r["lon"] is not None), None)
+        lat = first_gps["lat"] if first_gps else None
+        lon = first_gps["lon"] if first_gps else None
         out.append({
             "minute_local": minute,
             "minute_utc": minute - timedelta(hours=7),
@@ -109,9 +112,9 @@ def readings_1min(recs: list[dict]) -> list[dict]:
             "temp_c_mean": _mean(r["temp_c"] for r in rs),
             "humidity_pct_mean": _mean(r["humidity_pct"] for r in rs),
             "lux_mean": _mean(r["lux"] for r in rs),
-            "lat": first_gps["lat"] if first_gps else None,
-            "lon": first_gps["lon"] if first_gps else None,
-            "cell_id": None,              # #29
+            "lat": lat,
+            "lon": lon,
+            "cell_id": grid.latlon_to_cell(lat, lon),
         })
     return out
 

@@ -78,3 +78,13 @@ def test_cells_in_circle_rejects_bad_radius():
         g.cells_in_circle(g.ORIGIN_X + 1000, g.ORIGIN_Y - 1000, 0)
     with pytest.raises(ValueError):
         g.cells_in_circle(g.ORIGIN_X + 10, g.ORIGIN_Y - 10, 300)
+
+
+def test_pure_python_utm47n_matches_pyproj():
+    pytest.importorskip("pyproj")
+    for lat, lon in [(13.8594, 100.5475), (13.8850, 100.5800), (13.9493, 100.5711)]:
+        px, py = g.latlon_to_xy(lat, lon)
+        fx, fy = g._utm47n_forward(lon, lat)
+        assert abs(px - fx) < 1e-4 and abs(py - fy) < 1e-4
+        flon, flat = g._utm47n_inverse(fx, fy)
+        assert abs(flat - lat) < 1e-8 and abs(flon - lon) < 1e-8

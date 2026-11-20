@@ -82,6 +82,111 @@ def cell_bounds(cell_id: str) -> tuple[float, float, float, float]:
     return parse_cell_id(cell_id).bounds
 
 
+# WGS84 <-> EPSG:32647 (UTM Zone 47N) constants for pure-Python Lambda fallback
+_WGS84_A = 6_378_137.0
+_WGS84_F = 1.0 / 298.257223563
+_WGS84_E2 = _WGS84_F * (2.0 - _WGS84_F)
+_WGS84_EP2 = _WGS84_E2 / (1.0 - _WGS84_E2)
+_UTM47_LON0 = math.radians(99.0)
+_UTM_K0 = 0.9996
+_UTM_E0 = 500_000.0
+
+
+def _utm47n_forward(lon: float, lat: float) -> tuple[float, float]:
+    """WGS84 (lon, lat) degrees -> EPSG:32647 (x, y) metres."""
+    phi = math.radians(lat)
+    lam = math.radians(lon)
+    sin_p = math.sin(phi)
+    cos_p = math.cos(phi)
+    tan_p = math.tan(phi)
+
+    n = _WGS84_A / math.sqrt(1.0 - _WGS84_E2 * sin_p * sin_p)
+    t = tan_p * tan_p
+    c = _WGS84_EP2 * cos_p * cos_p
+    a = (lam - _UTM47_LON0) * cos_p
+
+    e2 = _WGS84_E2
+    e4 = e2 * e2
+    e6 = e4 * e2
+    m = _WGS84_A * (
+        (1.0 - e2 / 4.0 - 3.0 * e4 / 64.0 - 5.0 * e6 / 256.0) * phi
+        - (3.0 * e2 / 8.0 + 3.0 * e4 / 32.0 + 45.0 * e6 / 1024.0) * math.sin(2.0 * phi)
+        + (15.0 * e4 / 256.0 + 45.0 * e6 / 1024.0) * math.sin(4.0 * phi)
+        - (35.0 * e6 / 3072.0) * math.sin(6.0 * phi)
+    )
+
+    x = _UTM_E0 + _UTM_K0 * n * (
+        a
+        + (1.0 - t + c) * (a ** 3) / 6.0
+        + (5.0 - 18.0 * t + t * t + 72.0 * c - 58.0 * _WGS84_EP2) * (a ** 5) / 120.0
+    )
+    y = _UTM_K0 * (
+        m
+        + n
+        * tan_p
+        * (
+            (a * a) / 2.0
+            + (5.0 - t + 9.0 * c + 4.0 * c * c) * (a ** 4) / 24.0
+            + (61.0 - 58.0 * t + t * t + 600.0 * c - 330.0 * _WGS84_EP2) * (a ** 6) / 720.0
+        )
+    )
+    return x, y
+
+
+def _utm47n_inverse(x: float, y: float) -> tuple[float, float]:
+    """EPSG:32647 (x, y) metres -> WGS84 (lon, lat) degrees."""
+    e2 = _WGS84_E2
+    e4 = e2 * e2
+    e6 = e4 * e2
+    e1 = (1.0 - math.sqrt(1.0 - e2)) / (1.0 + math.sqrt(1.0 - e2))
+
+    m = y / _UTM_K0
+    mu = m / (_WGS84_A * (1.0 - e2 / 4.0 - 3.0 * e4 / 64.0 - 5.0 * e6 / 256.0))
+    phi1 = (
+        mu
+        + (3.0 * e1 / 2.0 - 27.0 * (e1 ** 3) / 32.0) * math.sin(2.0 * mu)
+        + (21.0 * (e1 ** 2) / 16.0 - 55.0 * (e1 ** 4) / 32.0) * math.sin(4.0 * mu)
+        + (151.0 * (e1 ** 3) / 96.0) * math.sin(6.0 * mu)
+        + (1097.0 * (e1 ** 4) / 512.0) * math.sin(8.0 * mu)
+    )
+
+    sin_p1 = math.sin(phi1)
+    cos_p1 = math.cos(phi1)
+    tan_p1 = math.tan(phi1)
+
+    c1 = _WGS84_EP2 * cos_p1 * cos_p1
+    t1 = tan_p1 * tan_p1
+    n1 = _WGS84_A / math.sqrt(1.0 - e2 * sin_p1 * sin_p1)
+    r1 = _WGS84_A * (1.0 - e2) / ((1.0 - e2 * sin_p1 * sin_p1) ** 1.5)
+    d = (x - _UTM_E0) / (n1 * _UTM_K0)
+
+    phi = phi1 - (n1 * tan_p1 / r1) * (
+        (d * d) / 2.0
+        - (5.0 + 3.0 * t1 + 10.0 * c1 - 4.0 * c1 * c1 - 9.0 * _WGS84_EP2) * (d ** 4) / 24.0
+        + (61.0 + 90.0 * t1 + 298.0 * c1 + 45.0 * t1 * t1 - 252.0 * _WGS84_EP2 - 3.0 * c1 * c1)
+        * (d ** 6)
+        / 720.0
+    )
+    lam = _UTM47_LON0 + (
+        d
+        - (1.0 + 2.0 * t1 + c1) * (d ** 3) / 6.0
+        + (5.0 - 2.0 * c1 + 28.0 * t1 - 3.0 * c1 * c1 + 8.0 * _WGS84_EP2 + 24.0 * t1 * t1)
+        * (d ** 5)
+        / 120.0
+    ) / cos_p1
+    return math.degrees(lam), math.degrees(phi)
+
+
+class _PureUtmForward:
+    def transform(self, lon: float, lat: float) -> tuple[float, float]:
+        return _utm47n_forward(lon, lat)
+
+
+class _PureUtmInverse:
+    def transform(self, x: float, y: float) -> tuple[float, float]:
+        return _utm47n_inverse(x, y)
+
+
 _to_utm = None
 _to_wgs = None
 
@@ -89,10 +194,14 @@ _to_wgs = None
 def _transformers():
     global _to_utm, _to_wgs
     if _to_utm is None:
-        from pyproj import Transformer  # imported lazily: heavy, only needed here
+        try:
+            from pyproj import Transformer  # imported lazily: heavy, only needed here
 
-        _to_utm = Transformer.from_crs("EPSG:4326", CRS, always_xy=True)
-        _to_wgs = Transformer.from_crs(CRS, "EPSG:4326", always_xy=True)
+            _to_utm = Transformer.from_crs("EPSG:4326", CRS, always_xy=True)
+            _to_wgs = Transformer.from_crs(CRS, "EPSG:4326", always_xy=True)
+        except ModuleNotFoundError:
+            _to_utm = _PureUtmForward()
+            _to_wgs = _PureUtmInverse()
     return _to_utm, _to_wgs
 
 
