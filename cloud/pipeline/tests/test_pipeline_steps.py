@@ -309,3 +309,15 @@ def test_readings_1min_populates_cell_id(s3):
     expected_cell = grid.latlon_to_cell(13.8850, 100.5800)
     assert expected_cell is not None
     assert m["cell_id"] == expected_cell
+
+
+def test_readings_1min_station_cell_id_from_registry(s3):
+    rows = [row(i, f"2026-11-16 08:30:0{i}", Device_Type="Stationary") for i in range(1, 4)]
+    put(s3, "12-1-3", to_csv(rows))
+    devices = [dev("IOTW-A001", "Stationary", 13.88, 100.57)]
+    run_all(s3, devices=devices)
+
+    (m,) = read_table(s3, "readings_1min")
+    expected_cell = grid.latlon_to_cell(13.88, 100.57)
+    assert expected_cell is not None
+    assert m["cell_id"] == expected_cell
