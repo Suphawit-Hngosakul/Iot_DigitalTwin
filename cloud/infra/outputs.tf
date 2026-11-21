@@ -66,3 +66,8 @@ output "satellite_ingest_function_name" {
   description = "satellite_ingest Lambda (#27), null when satellite_enabled = false"
   value       = one(module.satellite[*].ingest_function_name)
 }
+
+output "satellite_pipeline_state_machine_arn" {
+  description = "Satellite pipeline (#30-#31); start by hand with {\"batch_id\": \"scene_YYYY-MM-DD\", \"mode\": \"normal\"}. null when satellite_pipeline_enabled = false"
+  value       = one(module.satellite_pipeline[*].state_machine_arn)
+}

@@ -4,6 +4,12 @@ variable "bucket_name" {
   type = string
 }
 
+variable "eventbridge_enabled" {
+  description = "Send S3 events of this bucket to EventBridge (satellite pipeline trigger, spec 51 §2)"
+  type        = bool
+  default     = false
+}
+
 # Learner Lab: the bucket is created OUTSIDE Terraform (aws s3 mb, see
 # cloud/infra/README.md). The aws_s3_bucket resource always reads the bucket's
 # Object Lock configuration, and the Learner Lab SCP denies
@@ -65,4 +71,12 @@ output "bucket_name" {
 
 output "bucket_arn" {
   value = local.bucket_arn
+}
+
+# S3 -> EventBridge (spec 51 §2). One notification configuration per bucket: it
+# REPLACES any other S3 notification on the bucket, so add future ones here too.
+resource "aws_s3_bucket_notification" "eventbridge" {
+  count       = var.eventbridge_enabled ? 1 : 0
+  bucket      = local.bucket_name
+  eventbridge = true
 }

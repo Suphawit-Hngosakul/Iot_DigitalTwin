@@ -1,0 +1,35 @@
+# Data contract: static building density per 90 m cell (spec 32, D23) — produced by buildings.py (#28)
+# raw/satellite/static=buildings/buildings_grid.csv
+# building.shp footprints never leave GEE (D17): this file holds per-cell summaries only
+source: buildings
+version: 1
+description: ความหนาแน่นสิ่งปลูกสร้างต่อเซลล์ 90 m (building.shp ของ กทม. + Open Buildings เติม)
+format: csv
+encoding: utf-8
+key: [cell_id]
+
+standardize:
+  - strip_bom_from_header
+  - trim_whitespace
+  - {rule: empty_to_null, columns: [builtup_pct, building_count, floors_mean, far]}
+  - cast_types
+
+batch_checks:
+  - {rule: required_files, values: [buildings_grid.csv, metadata.json, _COMPLETE], level: BLOCK}
+  - {rule: required_columns, level: BLOCK}
+  - {rule: row_count_min, value: 1, level: BLOCK}
+  - {rule: row_count_equals_metadata, field: total_cells, level: BLOCK}
+  - {rule: unique_key, level: BLOCK}
+  - {rule: metadata_equals, field: crs, value: "EPSG:32647", level: BLOCK}
+  - {rule: metadata_equals, field: origin_x, value: 660015.0, level: BLOCK}
+  - {rule: metadata_equals, field: origin_y, value: 1545015.0, level: BLOCK}
+  - {rule: max_invalid_ratio, value: 0.20, level: BLOCK}
+
+columns:
+  - {name: cell_id, type: string, nullable: false, checks: [{rule: cell_id, level: BLOCK}]}
+  - {name: builtup_pct, type: float, unit: pct, nullable: true, checks: [{rule: range, min: 0, max: 100, level: BLOCK}]}
+  - {name: building_count, type: int, nullable: true, checks: [{rule: min, value: 0, level: BLOCK}]}
+  - {name: floors_mean, type: float, nullable: true, checks: [{rule: range, min: 1, max: 200, level: BLOCK}]}
+  - {name: far, type: float, nullable: true, checks: [{rule: range, min: 0, max: 50, level: BLOCK}]}
+  - {name: in_cover, type: bool, nullable: false}
+  - {name: bldg_source, type: string, nullable: false, checks: [{rule: allowed_values, values: [bma_shp, open_buildings], level: BLOCK}]}
