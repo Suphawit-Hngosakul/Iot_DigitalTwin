@@ -7,7 +7,7 @@ version: 1
 description: พิกเซล 30 m ต่อฉาก (Landsat 8/9 C2 L2) LST/NDVI/NDBI + cloud_mask
 format: csv
 encoding: utf-8
-key: [x, y]
+key: ["x", "y"]   # quoted: Terraform yamldecode (YAML 1.1) reads bare y as true
 
 standardize:
   - strip_bom_from_header
@@ -29,8 +29,8 @@ batch_checks:
   - {rule: max_invalid_ratio, value: 0.20, level: BLOCK}
 
 columns:
-  - {name: x, type: float, unit: m, nullable: false}
-  - {name: y, type: float, unit: m, nullable: false}
+  - {name: "x", type: float, unit: m, nullable: false}
+  - {name: "y", type: float, unit: m, nullable: false}
   - {name: lon, type: float, nullable: false, checks: [{rule: range, min: 97, max: 106, level: BLOCK}]}
   - {name: lat, type: float, nullable: false, checks: [{rule: range, min: 5, max: 21, level: BLOCK}]}
   - {name: lst_c, type: float, unit: degC, nullable: true, checks: [{rule: range, min: 0, max: 70, level: BLOCK}]}

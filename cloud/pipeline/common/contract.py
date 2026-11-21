@@ -55,6 +55,11 @@ def load(source: str, directory: str | Path | None = None) -> dict:
 def _checked(c: dict, source: str) -> dict:
     if c.get("source") != source:
         raise ValueError(f"contract source {c.get('source')!r} != {source!r}")
+    # A bare y / n / on / off in YAML 1.1 (Terraform yamldecode) becomes a bool: quote it.
+    names = [col.get("name") for col in c.get("columns", [])] + list(c.get("key") or [])
+    bad = [n for n in names if not isinstance(n, str)]
+    if bad:
+        raise ValueError(f"{source}: column/key names must be strings, got {bad!r} (quote them in YAML)")
     for col in c.get("columns", []):
         for chk in col.get("checks", []):
             if chk.get("level") not in LEVELS:

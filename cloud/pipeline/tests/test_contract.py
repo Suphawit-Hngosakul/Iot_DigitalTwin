@@ -111,3 +111,22 @@ def test_report_shape():
     r = ct.evaluate(ct.load("satellite_scene"), HEADER, GOOD, FILES, META)
     rep = r.report("scene_2026-04-12", "2026-11-21T00:00:00+00:00")
     assert rep["status"] == "PASS" and rep["passed"] == 3 and rep["contract_version"] == 1
+
+
+YAML11_BOOLS = {"y", "n", "yes", "no", "on", "off", "true", "false"}
+
+
+@pytest.mark.parametrize("source", ["satellite_scene", "satellite_season", "buildings"])
+def test_yaml11_bool_words_are_quoted(source):
+    """Terraform yamldecode follows YAML 1.1: a bare `y` turns into true (seen on AWS)."""
+    text = (ct._DIRS[0] / f"{source}.yaml").read_text(encoding="utf-8")
+    c = ct.load(source)
+    for name in ct.columns(c) + list(c["key"]):
+        if name.lower() in YAML11_BOOLS:
+            assert f'"{name}"' in text, f"{source}: quote column {name!r}"
+
+
+def test_non_string_column_name_is_rejected():
+    c = {"source": "s", "key": [True], "columns": [{"name": "x"}]}
+    with pytest.raises(ValueError, match="must be strings"):
+        ct._checked(c, "s")
