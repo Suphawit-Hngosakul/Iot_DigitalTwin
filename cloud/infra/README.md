@@ -18,6 +18,7 @@ IaC ของทุกอย่างใน `cloud/` ด้วย **Terraform/Op
 | `api` | 40 | #18 | Lambda `iot-dt-api` (Py3.12, LabRole) + HTTP API แยก `iot-dt-api`: `GET /devices /latest /readings /quality` + CORS (`api_allowed_origins`) + log 14 วัน (`cloud/api/`) |
 | `satellite` | 50 | #25, #27 | layer `iot-dt-gee` (earthengine-api) + Lambda `iot-dt-satellite-test` และ `iot-dt-satellite-ingest` (Py3.12, LabRole, timeout 900 s) + EventBridge รายวัน `cron(0 2 * * ? *)` (ตั้งด้วย `satellite_ingest_schedule`, `""` = รันมือเท่านั้น) ยืนยันตัวกับ GEE ด้วย WIF ไม่มี key (`cloud/satellite/`) ปิดไว้เป็นค่าเริ่มต้น เปิดด้วย `satellite_enabled = true` หลังรัน `cloud/satellite/layer/build_layer.py` |
 | `satellite_pipeline` | 32, 51 | #30, #31 | Lambda 6 ตัว `iot-dt-sat-*` + Step Functions `iot-dt-sat-pipeline` + EventBridge rule `iot-dt-sat-complete` (S3 Object Created `raw/satellite/*/_COMPLETE`, ปิดด้วย `satellite_pipeline_trigger_enabled = false`) + data contracts (`cloud/pipeline/contracts/*.yaml` แปลงเป็น JSON ตอน zip) แจ้งเตือนผ่าน SNS ของ `pipeline` ปิดไว้เป็นค่าเริ่มต้น เปิดด้วย `satellite_pipeline_enabled = true` (เปิด S3 → EventBridge ของ bucket ด้วย) |
+| `curated_merge` | 60 §2.1 | #32 | Lambda 4 ตัว `iot-dt-curated-*` + Step Functions `iot-dt-curated-merge` (PlanMerge → CheckSources → MergeCurated → VerifyCurated, `WaitingForOtherSources` เมื่อแหล่งไม่ครบ) + EventBridge rule `iot-dt-curated-published` (S3 `curated/_success/satellite|buildings/*.json`) + Scheduler รายวัน 10:00 น. เวลาไทย (`curated_merge_daily_schedule`, `""` = ไม่รัน) สร้างตาราง Iceberg `iot_walking.cell_period` ที่ `curated/cell_period/` (`cloud/analytics/curated_merge/`) ปิดไว้เป็นค่าเริ่มต้น เปิดด้วย `curated_merge_enabled = true` (ต้องเปิด `satellite_pipeline_enabled` ด้วย) |
 
 ```bash
 aws s3 mb s3://iot-dt-<account-id> --region us-east-1   # สร้าง bucket เองก่อน (ดูด้านล่าง)
@@ -65,3 +66,9 @@ aws athena get-query-execution --query-execution-id $QID \
   --query 'QueryExecution.[Status.State,Statistics.TotalExecutionTimeInMillis,Statistics.DataScannedInBytes]'
 aws athena get-query-results --query-execution-id $QID --output table
 ```
+
+**curated_merge (#32):**
+- ตาราง `cell_period` สร้างโดย Lambda ด้วย `CREATE TABLE IF NOT EXISTS` (Iceberg ต้องสร้างผ่าน Athena DDL ไม่ใช่ Terraform) จึงไม่อยู่ใน `terraform state`; ลบตารางต้อง `DROP TABLE` ใน Athena แล้วลบ `curated/cell_period/` กับ `curated/_success/merge/` เอง
+- apply แบบ `-target`: `terraform apply -target=module.catalog -target=module.curated_merge`
+- รันมือ: `{}` = merge ทุก period ที่ stale, `{"periods": ["scene_2024-03-17"], "mode": "force"}` = บังคับ period นั้น
+- ดู `cloud/analytics/curated_merge/README.md`

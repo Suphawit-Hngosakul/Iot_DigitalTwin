@@ -14,6 +14,7 @@
 # satellite_grid (spec 51 §4, #31) uses the same approach with its own keys:
 #   period_type = enum scene,season  (trusted/satellite_grid/period_type=<t>/)
 #   year        = integer satellite_year_range (Landsat 8 starts 2013)
+# buildings_grid (spec 51 §4, #32): trusted/buildings_grid/year=<YYYY>/, same year range.
 
 variable "bucket_name" {
   type = string
@@ -365,6 +366,67 @@ resource "aws_glue_catalog_table" "satellite_grid" {
   }
 }
 
+# --- trusted buildings grid (spec 51 §4, read by curated-merge #32) ---------
+#   trusted/buildings_grid/year=<YYYY>/buildings_<YYYY>.parquet
+# Must match satellite_schema.BUILDINGS_GRID / BUILDINGS_GRID_PARTITIONS.
+locals {
+  buildings_grid_partitions = [
+    ["year", "int"],
+  ]
+  buildings_grid_columns = [
+    ["cell_id", "string"],
+    ["builtup_pct", "double"],
+    ["building_count", "int"],
+    ["floors_mean", "double"],
+    ["far", "double"],
+    ["in_cover", "boolean"],
+    ["bldg_source", "string"],
+  ]
+}
+
+resource "aws_glue_catalog_table" "buildings_grid" {
+  database_name = aws_glue_catalog_database.this.name
+  name          = "buildings_grid"
+  description   = "Building summary per 90 m cell, one file per snapshot year (trusted/buildings_grid/, spec 51). in_cover=false = no data, not 'no buildings'"
+  table_type    = "EXTERNAL_TABLE"
+
+  parameters = {
+    "classification"            = "parquet"
+    "parquet.compression"       = "SNAPPY"
+    "projection.enabled"        = "true"
+    "projection.year.type"      = "integer"
+    "projection.year.range"     = var.satellite_year_range
+    "storage.location.template" = "${local.bucket_uri}/trusted/buildings_grid/year=$${year}/"
+  }
+
+  dynamic "partition_keys" {
+    for_each = local.buildings_grid_partitions
+    content {
+      name = partition_keys.value[0]
+      type = partition_keys.value[1]
+    }
+  }
+
+  storage_descriptor {
+    location      = "${local.bucket_uri}/trusted/buildings_grid/"
+    input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+    output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+
+    ser_de_info {
+      serialization_library = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+      parameters            = { "serialization.format" = "1" }
+    }
+
+    dynamic "columns" {
+      for_each = local.buildings_grid_columns
+      content {
+        name = columns.value[0]
+        type = columns.value[1]
+      }
+    }
+  }
+}
+
 # --- Athena ----------------------------------------------------------------
 resource "aws_athena_workgroup" "this" {
   name          = var.workgroup_name
@@ -398,6 +460,7 @@ locals {
     "raw-rows-per-hour"        = "Raw CSV rows per hour vs processed rows (pipeline check)"
     "raw-unknown-time-count"   = "Rows without a trusted time per device / session (RTC problems)"
     "satellite-grid-per-batch" = "satellite_grid cells / LST per scene or season (done-check of #31)"
+    "cell-period-coverage"     = "cell_period rows and column coverage per period / match set (done-check of #32)"
   }
 }
 

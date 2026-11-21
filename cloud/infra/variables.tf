@@ -142,3 +142,21 @@ variable "satellite_pipeline_trigger_enabled" {
   type        = bool
   default     = true
 }
+
+variable "curated_merge_enabled" {
+  description = "Deploy curated-merge (#32, spec 60 §2.1): Athena MERGE into Iceberg cell_period"
+  type        = bool
+  default     = false
+}
+
+variable "curated_merge_trigger_enabled" {
+  description = "Start curated-merge automatically (published satellite/buildings batch + daily run). false = manual runs only."
+  type        = bool
+  default     = true
+}
+
+variable "curated_merge_daily_schedule" {
+  description = "Scheduler expression (Asia/Bangkok) of the daily run that picks up late IoT data; \"\" = none"
+  type        = string
+  default     = "cron(0 10 * * ? *)"
+}

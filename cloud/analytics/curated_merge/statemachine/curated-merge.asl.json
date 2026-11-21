@@ -1,0 +1,198 @@
+{
+  "Comment": "curated-merge (spec 60 \u00a72.1, D23): merges satellite_grid + buildings_grid + readings_1min into Iceberg iot_walking.cell_period, one period at a time. Terraform fills the ARN placeholders with templatefile().",
+  "StartAt": "PlanMerge",
+  "States": {
+    "PlanMerge": {
+      "Type": "Task",
+      "Resource": "${plan_merge_arn}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "AnythingToMerge?"
+    },
+    "AnythingToMerge?": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.plan.count",
+          "NumericGreaterThan": 0,
+          "Next": "MergePeriods"
+        }
+      ],
+      "Default": "NothingToDo"
+    },
+    "MergePeriods": {
+      "Type": "Map",
+      "ItemsPath": "$.plan.periods",
+      "MaxConcurrency": 1,
+      "ResultPath": "$.results",
+      "ItemProcessor": {
+        "StartAt": "CheckSources",
+        "States": {
+          "CheckSources": {
+            "Type": "Task",
+            "Resource": "${check_sources_arn}",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 2,
+                "BackoffRate": 2
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "ResultPath": "$.error",
+                "Next": "IterationFailed"
+              }
+            ],
+            "Next": "SourcesReady?"
+          },
+          "SourcesReady?": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.check.ready",
+                "BooleanEquals": true,
+                "Next": "MergeCurated"
+              }
+            ],
+            "Default": "WaitingForOtherSources"
+          },
+          "MergeCurated": {
+            "Type": "Task",
+            "Resource": "${merge_curated_arn}",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 2,
+                "BackoffRate": 2
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "ResultPath": "$.error",
+                "Next": "IterationFailed"
+              }
+            ],
+            "Next": "VerifyCurated"
+          },
+          "VerifyCurated": {
+            "Type": "Task",
+            "Resource": "${verify_curated_arn}",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 2,
+                "BackoffRate": 2
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "ResultPath": "$.error",
+                "Next": "IterationFailed"
+              }
+            ],
+            "Next": "Published"
+          },
+          "Published": {
+            "Type": "Succeed"
+          },
+          "WaitingForOtherSources": {
+            "Type": "Succeed"
+          },
+          "IterationFailed": {
+            "Type": "Fail",
+            "Error": "MergeFailed",
+            "Cause": "A curated-merge step failed for one period; see the execution history"
+          }
+        }
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "Done"
+    },
+    "Done": {
+      "Type": "Succeed"
+    },
+    "NothingToDo": {
+      "Type": "Succeed"
+    },
+    "NotifyFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${alert_topic_arn}",
+        "Subject": "iot-dt curated-merge failed",
+        "Message.$": "States.JsonToString($)"
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.notify_error",
+          "Next": "PipelineFailed"
+        }
+      ],
+      "Next": "PipelineFailed"
+    },
+    "PipelineFailed": {
+      "Type": "Fail",
+      "Error": "PipelineFailed",
+      "Cause": "A curated-merge step failed; details were sent to the alert topic"
+    }
+  }
+}

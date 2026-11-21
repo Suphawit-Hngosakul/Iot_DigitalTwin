@@ -71,3 +71,8 @@ output "satellite_pipeline_state_machine_arn" {
   description = "Satellite pipeline (#30-#31); start by hand with {\"batch_id\": \"scene_YYYY-MM-DD\", \"mode\": \"normal\"}. null when satellite_pipeline_enabled = false"
   value       = one(module.satellite_pipeline[*].state_machine_arn)
 }
+
+output "curated_merge_state_machine_arn" {
+  description = "curated-merge (#32); start by hand with {\"periods\": [\"scene_2024-03-17\"], \"mode\": \"force\"} or {} to merge whatever is stale. null when curated_merge_enabled = false"
+  value       = one(module.curated_merge[*].state_machine_arn)
+}

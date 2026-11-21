@@ -125,3 +125,22 @@ module "satellite_pipeline" {
   pandas_layer_arn  = var.pandas_layer_arn
   trigger_enabled   = var.satellite_pipeline_trigger_enabled
 }
+
+# curated-merge (spec 60 §2.1, #32, D23): satellite_grid + buildings_grid + readings_1min ->
+# Iceberg iot_walking.cell_period (Athena MERGE). Triggered by published satellite/buildings batches
+# (needs satellite_pipeline_enabled for the S3 -> EventBridge notification) + a daily run.
+module "curated_merge" {
+  count             = var.curated_merge_enabled ? 1 : 0
+  source            = "./modules/curated_merge"
+  name_prefix       = var.name_prefix
+  bucket_name       = module.storage.bucket_name
+  role_arn          = data.aws_iam_role.lab.arn
+  functions_dir     = "${path.root}/../analytics/curated_merge/functions"
+  common_dir        = "${path.root}/../pipeline/common"
+  statemachine_file = "${path.root}/../analytics/curated_merge/statemachine/curated-merge.asl.json"
+  alert_topic_arn   = module.pipeline.alert_topic_arn
+  athena_database   = module.catalog.database_name
+  athena_workgroup  = module.catalog.workgroup_name
+  trigger_enabled   = var.curated_merge_trigger_enabled
+  daily_schedule    = var.curated_merge_daily_schedule
+}

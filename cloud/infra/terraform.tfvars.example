@@ -43,3 +43,9 @@ satellite_enabled = false
 # เปิดแล้ว bucket จะส่ง event ให้ EventBridge (aws_s3_bucket_notification ทับ notification อื่นของ bucket)
 satellite_pipeline_enabled = false
 # satellite_pipeline_trigger_enabled = true   # false = รันมือ (aws stepfunctions start-execution) เท่านั้น
+
+# curated-merge (#32, spec 60 §2.1): Athena MERGE -> Iceberg iot_walking.cell_period
+# ต้องเปิด satellite_pipeline_enabled ด้วย (S3 -> EventBridge) และ apply catalog ก่อน (ตาราง buildings_grid)
+curated_merge_enabled = false
+# curated_merge_trigger_enabled = true      # false = รันมือเท่านั้น
+# curated_merge_daily_schedule  = "cron(0 10 * * ? *)"   # "" = ไม่รันรายวัน
