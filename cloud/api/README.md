@@ -10,8 +10,18 @@ Lambda `iot-dt-api` (Python 3.12, `LabRole`, stdlib + boto3 ไม่ใช้ l
 | GET | `/latest` | `device` | `readings_1min` เฉพาะวันที่ของชั่วโมงล่าสุดที่ publish |
 | GET | `/readings` | `device`, `from`, `to`, `interval=1s\|1min` (default 1min) | `readings_1s` (≤ 6 ชม.) / `readings_1min` (≤ 31 วัน) |
 | GET | `/quality` | `device`, `from`, `to` (≤ 31 วัน) | `quality` รวมทุก session ต่อชั่วโมง |
+| GET | `/layers` | `period` (ไม่ใส่ = composite ฤดูล่าสุด) | marker `curated/_success/satellite/` + `curated/satellite/layers/<period>/` (ไม่ใช้ Athena) |
+| GET | `/grid` | `period`, `vars`, `match=window\|all` (default all) | `cell_period` (Iceberg, #32) → GeoJSON กริด 90 m |
+| GET | `/grid/{cell_id}` | `period` | `cell_period` ทั้ง `window` และ `all` ของเซลล์เดียว (popup) |
 
-endpoint ดาวเทียม `/layers`, `/grid`, `/analytics/{name}` ทำใน #34 (ใช้ Lambda ตัวเดียวกัน เพิ่ม route)
+`/analytics/{name}` รอ #33 (ใช้ Lambda ตัวเดียวกัน เพิ่ม route ทีหลัง)
+
+### satellite (#34)
+
+- `/layers` ตอบรายการ period ที่ publish แล้ว + ต่อ layer: `url` (presigned GET อายุ `LAYER_URL_TTL_S` = 3600 วินาที เพราะ bucket บล็อก public), `coordinates` (4 มุม [lon, lat] สำหรับ MapLibre), `legend`; `static_layers` = `building_density` (ต่อเซลล์ 90 m ไม่ขึ้นกับ period) อายุ URL จริงไม่เกินอายุ credentials ของ LabRole ใน Lambda
+- `/grid` และ `/grid/{cell_id}` ไม่ใส่ `period` = composite ฤดูล่าสุดที่ publish; รับ `scene_…`, `season_…`, `month_YYYY-MM`; `vars` ต้องอยู่ใน `GRID_VARS` (ค่าเริ่ม `lst_mean,ndvi_mean,ndbi_mean,builtup_pct`) ไม่ถูกต้อง → 400 ก่อนถึง Athena; ไม่มีข้อมูล → 404
+- รูปเซลล์ (Polygon) คำนวณจาก `cell_id` ใน Lambda ด้วย `common/grid.py` ไม่ต้องใช้ pyproj; ไม่มี footprint อาคารหรือเส้นเขต (D17)
+- ค่า IoT ใน `/grid` เป็น `null` จนกว่า IoT จะเข้ากริดหลักสี่
 
 ## กติกา
 
@@ -26,7 +36,7 @@ endpoint ดาวเทียม `/layers`, `/grid`, `/analytics/{name}` ทำ
 
 ## ค่าตั้งค่า (env ของ Lambda, Terraform ใส่ให้)
 
-`DATA_BUCKET`, `ATHENA_DB=iot_walking`, `ATHENA_WORKGROUP=iot_walking`, `ATHENA_OUTPUT` (workgroup บังคับ output เองอยู่แล้ว), `ATHENA_TIMEOUT_S=25`, `CACHE_TTL_S=60`, `ALLOWED_ORIGINS` (ไว้ดูเฉยๆ CORS ทำที่ API GW)
+`DATA_BUCKET`, `LAYER_URL_TTL_S=3600`, `ATHENA_DB=iot_walking`, `ATHENA_WORKGROUP=iot_walking`, `ATHENA_OUTPUT` (workgroup บังคับ output เองอยู่แล้ว), `ATHENA_TIMEOUT_S=25`, `CACHE_TTL_S=60`, `ALLOWED_ORIGINS` (ไว้ดูเฉยๆ CORS ทำที่ API GW)
 
 ## ทดสอบ
 

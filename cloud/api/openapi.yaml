@@ -10,7 +10,8 @@ info:
       จะแปลงเป็นเวลาไทยให้ ช่วงเวลาเป็น [from, to)
     - เวลาที่ตอบกลับ (`*_local`) เป็นเวลาไทยไม่มี offset, `*_utc` เป็น UTC ไม่มี offset
     - ผลลัพธ์เดียวกันถูก cache ใน Lambda 60 วินาที
-    - endpoint ดาวเทียม (`/layers`, `/grid`, `/analytics`) ทำใน #34
+    - endpoint ดาวเทียม `/layers`, `/grid`, `/grid/{cell_id}` (#34) ออกได้แค่ค่าต่อเซลล์ 90 m ไม่มี footprint อาคารหรือเส้นขอบเขต (D17)
+    - `/analytics/{name}` รอ #33
 servers:
   - url: https://{api_id}.execute-api.us-east-1.amazonaws.com
     variables:
@@ -139,6 +140,88 @@ paths:
         "502": { $ref: "#/components/responses/Upstream" }
         "504": { $ref: "#/components/responses/Timeout" }
 
+  /layers:
+    get:
+      summary: ภาพ layer ดาวเทียม (PNG) + มุมภาพ + legend
+      description: |
+        รายการ period ที่ publish แล้ว + URL ของ PNG ต่อ layer (presigned GET, อายุ `url_expires_in_s`)
+        ไม่ใส่ `period` = composite ฤดูล่าสุด (ถ้ายังไม่มี ใช้ฉากล่าสุด)
+        `coordinates` = [lon, lat] 4 มุม (บนซ้าย, บนขวา, ล่างขวา, ล่างซ้าย) ใช้กับ MapLibre image source
+      operationId: getLayers
+      parameters:
+        - name: period
+          in: query
+          required: false
+          description: "`scene_YYYY-MM-DD` หรือ `season_YYYY_MM-MM`"
+          schema: { type: string, example: season_2025_03-05 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Layers" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/Upstream" }
+
+  /grid:
+    get:
+      summary: GeoJSON กริด 90 m พร้อมค่าตัวแปร
+      description: |
+        อ่านจาก `cell_period` (Iceberg, #32) ไม่ใส่ `period` = composite ฤดูล่าสุด
+        ค่า IoT เป็น null จนกว่าจะมี IoT ในเซลล์นั้น
+      operationId: getGrid
+      parameters:
+        - name: period
+          in: query
+          required: false
+          description: "`scene_...`, `season_...` หรือ `month_YYYY-MM`"
+          schema: { type: string, example: season_2025_03-05 }
+        - name: vars
+          in: query
+          required: false
+          description: คอลัมน์ที่ต้องการ คั่นด้วย `,` (ค่าเริ่ม `lst_mean,ndvi_mean,ndbi_mean,builtup_pct`)
+          schema: { type: string, example: "lst_mean,builtup_pct" }
+        - name: match
+          in: query
+          required: false
+          description: ชุดจับคู่ IoT (`all` = ทุกเวลา ค่าเริ่ม, `window` = รอบเวลาถ่ายภาพ)
+          schema: { type: string, enum: [window, all], default: all }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GridCollection" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/Upstream" }
+        "504": { $ref: "#/components/responses/Timeout" }
+
+  /grid/{cell_id}:
+    get:
+      summary: ค่าทุกตัวของเซลล์เดียว (popup)
+      operationId: getGridCell
+      parameters:
+        - name: cell_id
+          in: path
+          required: true
+          schema: { type: string, example: c0123_r0456 }
+        - name: period
+          in: query
+          required: false
+          schema: { type: string, example: season_2025_03-05 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GridCell" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/Upstream" }
+        "504": { $ref: "#/components/responses/Timeout" }
+
 components:
   parameters:
     device:
@@ -239,3 +322,77 @@ components:
         invalid_rows: { type: integer }
         dropped_rows: { type: integer, description: duplicate_rows + invalid_rows }
         loss_rate: { type: number, description: missing_rows / expected_rows (0 ถ้า expected = 0) }
+
+    LayerEntry:
+      type: object
+      properties:
+        layer: { type: string, enum: [lst, ndvi, ndbi, building_density] }
+        url: { type: string, description: presigned GET ของ PNG }
+        url_expires_in_s: { type: integer }
+        coordinates:
+          type: array
+          description: "[lon, lat] x4: บนซ้าย, บนขวา, ล่างขวา, ล่างซ้าย"
+          items: { type: array, items: { type: number }, minItems: 2, maxItems: 2 }
+        legend:
+          type: object
+          description: colormap คงที่ (column, min, max, unit, stops)
+
+    Layers:
+      type: object
+      properties:
+        period: { type: string, example: season_2025_03-05 }
+        period_type: { type: string, enum: [scene, season] }
+        periods:
+          type: array
+          description: ทุก period ที่ publish แล้ว ใหม่สุดก่อน
+          items:
+            type: object
+            properties:
+              period: { type: string }
+              period_type: { type: string, enum: [scene, season] }
+              date_start: { type: string, format: date }
+              date_end: { type: string, format: date }
+        layers: { type: array, items: { $ref: "#/components/schemas/LayerEntry" } }
+        static_layers:
+          type: array
+          description: layer ที่ไม่ขึ้นกับ period (ความหนาแน่นอาคารต่อเซลล์ 90 m)
+          items: { $ref: "#/components/schemas/LayerEntry" }
+
+    Polygon:
+      type: object
+      properties:
+        type: { type: string, enum: [Polygon] }
+        coordinates:
+          type: array
+          items: { type: array, items: { type: array, items: { type: number } } }
+
+    GridCollection:
+      type: object
+      properties:
+        type: { type: string, enum: [FeatureCollection] }
+        period: { type: string }
+        match: { type: string, enum: [window, all] }
+        vars: { type: array, items: { type: string } }
+        features:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string, enum: [Feature] }
+              id: { type: string, example: c0123_r0456 }
+              geometry: { $ref: "#/components/schemas/Polygon" }
+              properties:
+                type: object
+                description: "`cell_id` + ตัวแปรใน `vars`"
+                additionalProperties: true
+
+    GridCell:
+      type: object
+      properties:
+        cell_id: { type: string }
+        period: { type: string }
+        geometry: { $ref: "#/components/schemas/Polygon" }
+        match:
+          type: object
+          description: คีย์ `window` / `all` แต่ละอันมีคอลัมน์ทั้งหมดของ cell_period (ดาวเทียม, อาคาร, IoT)
+          additionalProperties: { type: object, additionalProperties: true }

@@ -307,6 +307,126 @@ def test_quality_range_limit(athena):
     assert code == 400
 
 
+# --- satellite: /layers ------------------------------------------------------
+
+def put_marker(s3, batch_id):
+    s3.put_object(Bucket=BUCKET, Key=f"curated/_success/satellite/{batch_id}.json", Body=b"{}")
+
+
+def put_layers(s3, prefix, names=("lst", "ndvi", "ndbi")):
+    for n in names:
+        s3.put_object(Bucket=BUCKET, Key=f"{prefix}{n}.png", Body=b"png")
+        s3.put_object(Bucket=BUCKET, Key=f"{prefix}{n}.json", Body=json.dumps({
+            "coordinates": [[100.5, 13.9], [100.6, 13.9], [100.6, 13.8], [100.5, 13.8]],
+            "legend": {"layer": n, "min": 0, "max": 1}, "batch_id": "x"}))
+
+
+def test_layers_defaults_to_latest_season(env):
+    for b in ("scene_2025-04-10", "season_2024_03-05", "season_2025_03-05", "static_buildings"):
+        put_marker(env, b)
+    put_layers(env, "curated/satellite/layers/season_2025_03-05/")
+    put_layers(env, "curated/satellite/layers/static/", ("building_density",))
+    code, body = call("/layers")
+    assert code == 200, body
+    assert body["period"] == "season_2025_03-05" and body["period_type"] == "season"
+    assert [p["period"] for p in body["periods"]] == \
+        ["scene_2025-04-10", "season_2025_03-05", "season_2024_03-05"]   # newest date_start first
+    assert [x["layer"] for x in body["layers"]] == ["lst", "ndvi", "ndbi"]
+    lst = body["layers"][0]
+    assert "curated/satellite/layers/season_2025_03-05/lst.png" in lst["url"]
+    assert lst["legend"]["layer"] == "lst" and len(lst["coordinates"]) == 4
+    assert [x["layer"] for x in body["static_layers"]] == ["building_density"]
+
+
+def test_layers_scene_and_errors(env):
+    put_marker(env, "scene_2025-04-10")
+    put_layers(env, "curated/satellite/layers/scene_2025-04-10/")
+    code, body = call("/layers", period="scene_2025-04-10")
+    assert code == 200 and body["period_type"] == "scene" and body["static_layers"] == []
+    assert call("/layers", period="scene_2025-04-11")[0] == 404      # not published
+    assert call("/layers", period="year_2025")[0] == 400
+    assert call("/layers", period="../../raw")[0] == 400
+
+
+def test_layers_nothing_published(env):
+    assert call("/layers")[0] == 404
+
+
+# --- satellite: /grid --------------------------------------------------------
+
+GRID_COLS = [("cell_id", "varchar"), ("lst_mean", "double"), ("builtup_pct", "double")]
+
+
+def test_grid_geojson(env, athena):
+    athena.columns = GRID_COLS
+    athena.rows = [["c0001_r0002", "38.5", "40"], ["c0002_r0002", None, "10"]]
+    code, body = call("/grid", period="season_2025_03-05", vars="lst_mean,builtup_pct")
+    assert code == 200, body
+    assert "FROM cell_period" in athena.sql
+    assert "period = 'season_2025_03-05'" in athena.sql and "match_type = 'all'" in athena.sql
+    assert body["type"] == "FeatureCollection" and len(body["features"]) == 2
+    f = body["features"][0]
+    assert f["id"] == "c0001_r0002" and f["properties"] == \
+        {"cell_id": "c0001_r0002", "lst_mean": 38.5, "builtup_pct": 40.0}
+    ring = f["geometry"]["coordinates"][0]
+    assert len(ring) == 5 and ring[0] == ring[-1]
+    lon, lat = ring[0]
+    assert 100.0 < lon < 101.0 and 13.0 < lat < 15.0      # Bangkok
+    assert body["features"][1]["properties"]["lst_mean"] is None
+
+
+def test_grid_default_period_and_vars(env, athena):
+    put_marker(env, "season_2025_03-05")
+    athena.columns = GRID_COLS
+    athena.rows = [["c0001_r0002", "38.5", "40"]]
+    code, body = call("/grid")
+    assert code == 200 and body["period"] == "season_2025_03-05"
+    assert body["vars"] == list(handler.GRID_DEFAULT_VARS)
+
+
+@pytest.mark.parametrize("params", [
+    {"period": "season_2025_03-05", "vars": "lst_mean; DROP TABLE x"},
+    {"period": "season_2025_03-05", "vars": "geom_wkt"},
+    {"period": "season_2025_03-05' OR '1'='1"},
+    {"period": "year_2025"},
+    {"period": "season_2025_03-05", "match": "bad"},
+])
+def test_grid_rejects_before_athena(env, athena, params):
+    assert call("/grid", **params)[0] == 400
+    assert athena.queries == []
+
+
+def test_grid_month_period_ok_and_empty_404(env, athena):
+    athena.columns = GRID_COLS
+    athena.rows = []
+    assert call("/grid", period="month_2026-11")[0] == 404
+    assert "period = 'month_2026-11'" in athena.sql
+
+
+def test_grid_cell_popup(env, athena):
+    athena.columns = [("match_type", "varchar"), ("period_type", "varchar"), ("lst_mean", "double"),
+                      ("air_temp_mean", "double")]
+    athena.rows = [["all", "season", "38.5", "33.1"], ["window", "season", "38.5", None]]
+    code, body = call("/grid/c0001_r0002", period="season_2025_03-05")
+    assert code == 200, body
+    assert "cell_id = 'c0001_r0002'" in athena.sql and "merged_at" not in athena.sql
+    assert body["cell_id"] == "c0001_r0002"
+    assert body["match"]["all"]["air_temp_mean"] == 33.1
+    assert body["match"]["window"]["air_temp_mean"] is None
+    assert "match_type" not in body["match"]["all"]
+    assert body["geometry"]["type"] == "Polygon"
+
+
+@pytest.mark.parametrize("cell", ["bad", "c1_r2", "c0001_r0002'--", "c0001_r0002%27"])
+def test_grid_cell_rejects_bad_id(env, athena, cell):
+    assert call(f"/grid/{cell}", period="season_2025_03-05")[0] == 400
+    assert athena.queries == []
+
+
+def test_grid_never_exposes_footprints_or_borders():
+    assert not [v for v in handler.GRID_VARS if "geom" in v or "wkt" in v or "boundary" in v]
+
+
 # --- routing -----------------------------------------------------------------
 
 def test_unknown_route_and_method():
@@ -317,6 +437,6 @@ def test_unknown_route_and_method():
 def test_openapi_matches_routes():
     yaml = pytest.importorskip("yaml")
     spec = yaml.safe_load((Path(handler.__file__).with_name("openapi.yaml")).read_text("utf-8"))
-    assert set(spec["paths"]) == set(handler.ROUTES)
+    assert set(spec["paths"]) == set(handler.ROUTES) | {"/grid/{cell_id}"}
     for path, ops in spec["paths"].items():
         assert set(ops) == {"get"}, path
