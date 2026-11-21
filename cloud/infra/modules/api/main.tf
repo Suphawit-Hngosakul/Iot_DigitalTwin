@@ -1,4 +1,5 @@
-# Lambda api + its own HTTP API: GET /devices /latest /readings /quality (spec 40 §3, #18).
+# Lambda api + its own HTTP API: GET /devices /latest /readings /quality (spec 40 §3, #18)
+# + /layers /grid /grid/{cell_id} (#34).
 # Separate from the ingest API so CORS / throttling for the web never touch device uploads.
 terraform {
   required_providers {
@@ -30,10 +31,10 @@ variable "throttle_rate" {
 
 locals {
   function_name = "${var.name_prefix}-api"
-  routes        = ["/devices", "/latest", "/readings", "/quality"]
+  routes        = ["/devices", "/latest", "/readings", "/quality", "/layers", "/grid", "/grid/{cell_id}"]
 }
 
-# handler.py + common/schema.py + devices.csv (stdlib + boto3 only, no layer).
+# handler.py + common/{schema,grid,satellite_schema,curated}.py + devices.csv (stdlib + boto3 only, no layer).
 data "archive_file" "api" {
   type        = "zip"
   output_path = "${path.module}/build/api.zip"
@@ -49,6 +50,18 @@ data "archive_file" "api" {
   source {
     content  = file("${var.common_dir}/schema.py")
     filename = "common/schema.py"
+  }
+  source {
+    content  = file("${var.common_dir}/grid.py")
+    filename = "common/grid.py"
+  }
+  source {
+    content  = file("${var.common_dir}/satellite_schema.py")
+    filename = "common/satellite_schema.py"
+  }
+  source {
+    content  = file("${var.common_dir}/curated.py")
+    filename = "common/curated.py"
   }
   source {
     content  = file("${var.common_dir}/devices.csv")
@@ -79,6 +92,7 @@ resource "aws_lambda_function" "api" {
       ATHENA_OUTPUT    = var.athena_output
       ATHENA_TIMEOUT_S = "25"
       CACHE_TTL_S      = "60"
+      LAYER_URL_TTL_S  = "3600" # presigned GET for the layer PNGs (#34)
       ALLOWED_ORIGINS  = join(",", var.allowed_origins) # informational; CORS is done by API GW
     }
   }

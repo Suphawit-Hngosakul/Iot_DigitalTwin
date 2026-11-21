@@ -6,6 +6,9 @@ API Gateway HTTP API (payload format 2.0), all GET, JSON out:
     /latest?device=                            last readings_1min row
     /readings?device=&from=&to=&interval=      readings_1s (<= 6 h) or readings_1min (<= 31 d)
     /quality?device=&from=&to=                 loss per hour (<= 31 d)
+    /layers?period=                            satellite PNG layers (presigned URLs) + bounds + legend (#34)
+    /grid?period=&vars=&match=                 GeoJSON 90 m grid with per-cell values (#34)
+    /grid/{cell_id}?period=                    every value of one cell, window + all (#34)
 
 `from` / `to` are ISO times. Without an offset they are Thai local time (the
 same clock as the CSV DateTime); with one (`Z`, `+07:00`, ...) they are
@@ -31,19 +34,24 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from datetime import date, datetime, timedelta
+from functools import lru_cache
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
-from common import schema
+from common import curated, grid, schema
+from common import satellite_schema as ss
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
 ATHENA_TIMEOUT_S = float(os.environ.get("ATHENA_TIMEOUT_S", 25))
 CACHE_TTL_S = float(os.environ.get("CACHE_TTL_S", 60))
+LAYER_URL_TTL_S = int(os.environ.get("LAYER_URL_TTL_S", 3600))
 
 INTERVALS = {
     # interval -> (table, time column, longest range)
@@ -52,6 +60,22 @@ INTERVALS = {
 }
 QUALITY_MAX_RANGE = timedelta(days=31)
 MANIFEST_PREFIX = "processed/_manifests/"
+SATELLITE_SUCCESS_PREFIX = "curated/_success/satellite/"
+PIXEL_LAYERS = ("lst", "ndvi", "ndbi")
+STATIC_LAYERS = ("building_density",)
+STATIC_LAYERS_PREFIX = "curated/satellite/layers/static/"
+
+# /grid: only these cell_period columns may be asked for (never copied into SQL
+# unchecked). Footprints and district borders are not columns here, so they
+# cannot leak (D17).
+GRID_VARS = (
+    "n_scenes", "clear_obs_mean", "valid_pixel_ratio", "lst_mean", "lst_p90", "ndvi_mean",
+    "ndbi_mean", "green_ratio", "builtup_pct", "building_count", "floors_mean", "far",
+    "in_cover", "bldg_source", "air_temp_mean", "humidity_mean", "lux_mean", "db_spl_mean",
+    "n_iot_minutes", "n_devices",
+)
+GRID_DEFAULT_VARS = ("lst_mean", "ndvi_mean", "ndbi_mean", "builtup_pct")
+MATCH_TYPES = ("window", "all")
 
 _s3 = None
 _athena = None
@@ -70,7 +94,8 @@ class ApiError(Exception):
 def _s3_client():
     global _s3
     if _s3 is None:
-        _s3 = boto3.client("s3")
+        # SigV4: presigned URLs of a regional bucket need it
+        _s3 = boto3.client("s3", config=Config(signature_version="s3v4"))
     return _s3
 
 
@@ -345,13 +370,189 @@ def get_quality(params: dict) -> dict:
         hours.append(row)
     return {"device": device, "from": _iso(start), "to": _iso(end), "hours": hours}
 
+# --- satellite: /layers ----------------------------------------------------
+
+def list_satellite_periods(s3=None) -> list[dict]:
+    """Published satellite periods (scene / season), newest first, from the
+    curated/_success/satellite/ markers (spec 51 §4)."""
+    s3 = s3 or _s3_client()
+    out = []
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=os.environ["DATA_BUCKET"],
+                                   Prefix=SATELLITE_SUCCESS_PREFIX):
+        for obj in page.get("Contents", []):
+            name = obj["Key"][len(SATELLITE_SUCCESS_PREFIX):]
+            if not name.endswith(".json"):
+                continue
+            try:
+                p = ss.parse_period(name[:-len(".json")])
+            except ValueError:
+                continue
+            if p.period_type in ("scene", "season"):
+                out.append({"period": p.period, "period_type": p.period_type,
+                            "date_start": p.date_start.isoformat(),
+                            "date_end": p.date_end.isoformat()})
+    out.sort(key=lambda x: (x["date_start"], x["period"]), reverse=True)
+    return out
+
+
+def _latest_period(periods: list[dict]) -> str | None:
+    """Newest season composite; if there is none yet, the newest scene."""
+    for kind in ("season", "scene"):
+        for p in periods:
+            if p["period_type"] == kind:
+                return p["period"]
+    return None
+
+
+def _check_period(value: str | None, allowed: tuple[str, ...]) -> str:
+    """Validate a period string against its pattern (it ends up in a key or SQL)."""
+    v = (value or "").strip()
+    try:
+        if allowed == ("scene", "season"):
+            ok = ss.parse_period(v).period_type in allowed
+        else:
+            ok = curated.parse_merge_period(v).period_type in allowed
+    except ValueError:
+        ok = False
+    if not ok:
+        raise ApiError(400, f"bad period: {value!r}")
+    return v
+
+
+def _read_json(s3, key: str) -> dict | None:
+    try:
+        obj = s3.get_object(Bucket=os.environ["DATA_BUCKET"], Key=key)
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+            return None
+        raise
+    return json.loads(obj["Body"].read())
+
+
+def _layer_entries(s3, prefix: str, names: tuple[str, ...]) -> list[dict]:
+    out = []
+    for name in names:
+        meta = _read_json(s3, f"{prefix}{name}.json")
+        if meta is None:
+            continue
+        url = s3.generate_presigned_url(
+            "get_object", ExpiresIn=LAYER_URL_TTL_S,
+            Params={"Bucket": os.environ["DATA_BUCKET"], "Key": f"{prefix}{name}.png"})
+        out.append({"layer": name, "url": url, "url_expires_in_s": LAYER_URL_TTL_S,
+                    "coordinates": meta.get("coordinates"), "legend": meta.get("legend")})
+    return out
+
+
+def get_layers(params: dict) -> dict:
+    s3 = _s3_client()
+    periods = list_satellite_periods(s3)
+    period = params.get("period")
+    if period:
+        period = _check_period(period, ("scene", "season"))
+        if not any(p["period"] == period for p in periods):
+            raise ApiError(404, f"no published layers for {period}")
+    else:
+        period = _latest_period(periods)
+        if period is None:
+            raise ApiError(404, "no published satellite layers yet")
+    return {
+        "period": period,
+        "period_type": ss.parse_period(period).period_type,
+        "periods": periods,
+        "layers": _layer_entries(s3, f"curated/satellite/layers/{period}/", PIXEL_LAYERS),
+        "static_layers": _layer_entries(s3, STATIC_LAYERS_PREFIX, STATIC_LAYERS),
+    }
+
+
+# --- satellite: /grid ------------------------------------------------------
+
+@lru_cache(maxsize=None)
+def _corner(col: int, row: int) -> tuple[float, float]:
+    """[lon, lat] of the north-west corner of cell (col, row); neighbours share corners."""
+    x = grid.ORIGIN_X + col * grid.GRID_SIZE_M
+    y = grid.ORIGIN_Y - row * grid.GRID_SIZE_M
+    lat, lon = grid.xy_to_latlon(x, y)
+    return round(lon, 6), round(lat, 6)
+
+
+def cell_polygon(cell_id: str) -> dict:
+    c = grid.parse_cell_id(cell_id)
+    nw, ne = _corner(c.col, c.row), _corner(c.col + 1, c.row)
+    se, sw = _corner(c.col + 1, c.row + 1), _corner(c.col, c.row + 1)
+    return {"type": "Polygon", "coordinates": [[list(nw), list(ne), list(se), list(sw), list(nw)]]}
+
+
+def _grid_period(params: dict) -> str:
+    period = params.get("period")
+    if period:
+        return _check_period(period, ("scene", "season", "month"))
+    latest = _latest_period(list_satellite_periods())
+    if latest is None:
+        raise ApiError(404, "no published satellite data yet")
+    return latest
+
+
+def _parse_vars(value: str | None) -> list[str]:
+    if not value or not value.strip():
+        return list(GRID_DEFAULT_VARS)
+    names = [v.strip() for v in value.split(",") if v.strip()]
+    bad = [v for v in names if v not in GRID_VARS]
+    if bad or not names:
+        raise ApiError(400, f"unknown vars: {', '.join(bad)}; allowed: {', '.join(GRID_VARS)}")
+    return list(dict.fromkeys(names))
+
+
+def get_grid(params: dict) -> dict:
+    match = params.get("match") or "all"
+    if match not in MATCH_TYPES:
+        raise ApiError(400, "match must be window or all")
+    names = _parse_vars(params.get("vars"))
+    period = _grid_period(params)
+    sql = (f"SELECT cell_id, {', '.join(names)} FROM cell_period "
+           f"WHERE period = '{period}' AND match_type = '{match}' ORDER BY cell_id")
+    columns, rows = run_query(sql)
+    if not rows:
+        raise ApiError(404, f"no grid for {period} ({match})")
+    features = []
+    for r in rows:
+        props = dict(zip(columns, r))
+        features.append({"type": "Feature", "id": props["cell_id"],
+                         "geometry": cell_polygon(props["cell_id"]), "properties": props})
+    return {"type": "FeatureCollection", "period": period, "match": match,
+            "vars": names, "features": features}
+
+
+def get_grid_cell(params: dict) -> dict:
+    cell_id = (params.get("cell_id") or "").strip()
+    try:
+        grid.parse_cell_id(cell_id)
+    except ValueError:
+        raise ApiError(400, f"bad cell_id: {cell_id!r}") from None
+    period = _grid_period(params)
+    cols = ", ".join(["match_type"] + [c for c in curated.COLUMN_NAMES[3:] if c != "merged_at"])
+    sql = (f"SELECT {cols} FROM cell_period "
+           f"WHERE cell_id = '{cell_id}' AND period = '{period}' ORDER BY match_type")
+    columns, rows = run_query(sql)
+    if not rows:
+        raise ApiError(404, f"no data for {cell_id} in {period}")
+    by_match = {}
+    for r in rows:
+        row = dict(zip(columns, r))
+        by_match[row.pop("match_type")] = row
+    return {"cell_id": cell_id, "period": period, "geometry": cell_polygon(cell_id),
+            "match": by_match}
+
 
 ROUTES = {
     "/devices": get_devices,
     "/latest": get_latest,
     "/readings": get_readings,
     "/quality": get_quality,
+    "/layers": get_layers,
+    "/grid": get_grid,
 }
+GRID_CELL_PREFIX = "/grid/"
 
 
 def _cache_key(path: str, params: dict) -> str:
@@ -364,7 +565,11 @@ def handler(event, context=None):
     path = event.get("rawPath") or http.get("path") or "/"
     params = event.get("queryStringParameters") or {}
 
-    fn = ROUTES.get(path.rstrip("/") or "/")
+    path_key = path.rstrip("/") or "/"
+    fn = ROUTES.get(path_key)
+    if fn is None and path_key.startswith(GRID_CELL_PREFIX):
+        fn = get_grid_cell
+        params = {**params, "cell_id": path_key[len(GRID_CELL_PREFIX):]}
     if fn is None:
         return _resp(404, {"error": f"no route {path}"})
     if method != "GET":
