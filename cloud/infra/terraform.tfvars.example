@@ -38,3 +38,8 @@ satellite_enabled = false
 # satellite_ingest_schedule = "cron(0 2 * * ? *)"   # "" = รันมือเท่านั้น
 # satellite_max_cloud_pct   = 40
 # satellite_min_valid_ratio = 0.15
+
+# satellite pipeline (#30-#31, spec 51): raw/satellite/<batch>/_COMPLETE -> contract -> trusted/ + layers
+# เปิดแล้ว bucket จะส่ง event ให้ EventBridge (aws_s3_bucket_notification ทับ notification อื่นของ bucket)
+satellite_pipeline_enabled = false
+# satellite_pipeline_trigger_enabled = true   # false = รันมือ (aws stepfunctions start-execution) เท่านั้น

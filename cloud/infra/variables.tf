@@ -130,3 +130,15 @@ variable "satellite_min_valid_ratio" {
   type        = number
   default     = 0.15
 }
+
+variable "satellite_pipeline_enabled" {
+  description = "Deploy the satellite pipeline (#30-#31, spec 51) and turn on S3 -> EventBridge notifications for the bucket"
+  type        = bool
+  default     = false
+}
+
+variable "satellite_pipeline_trigger_enabled" {
+  description = "Start the satellite pipeline automatically for every raw/satellite/*/_COMPLETE. false = manual runs only."
+  type        = bool
+  default     = true
+}

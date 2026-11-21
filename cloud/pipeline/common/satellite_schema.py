@@ -387,19 +387,98 @@ def s3_prefix_raw_static(name: str) -> str:
     return f"raw/satellite/static={name}/"
 
 
+# Zones follow D23 (spec 01 §2): raw -> trusted -> curated (+ quarantine).
+STATIC_BUILDINGS = "static_buildings"
+
+
+def batch_kind(batch_id: str) -> str:
+    """scene | season | buildings for a satellite-pipeline batch_id.
+
+    batch_id = the raw folder name: scene_<YYYY-MM-DD>, season_<YYYY>_03-05,
+    or static_buildings (raw/satellite/static=buildings/).
+    """
+    if batch_id == STATIC_BUILDINGS:
+        return "buildings"
+    p = parse_period(batch_id)
+    if p.period_type == "year":
+        raise ValueError(f"year composites are not a satellite batch: {batch_id!r}")
+    return p.period_type
+
+
+def batch_id_from_key(key: str) -> str:
+    """batch_id from an S3 key under raw/satellite/ (e.g. the _COMPLETE that fired the event)."""
+    parts = key.split("/")
+    if len(parts) < 4 or parts[:2] != ["raw", "satellite"]:
+        raise ValueError(f"not a raw/satellite/ key: {key!r}")
+    folder = parts[2]
+    bid = STATIC_BUILDINGS if folder == "static=buildings" else folder
+    batch_kind(bid)
+    return bid
+
+
+def zone_source(batch_id: str) -> str:
+    """<source> used in quarantine/, validation/ and curated/_success/ paths."""
+    return "buildings" if batch_kind(batch_id) == "buildings" else "satellite"
+
+
+def contract_source(batch_id: str) -> str:
+    """Name of cloud/pipeline/contracts/<name>.yaml for a batch."""
+    return {"scene": "satellite_scene", "season": "satellite_season",
+            "buildings": "buildings"}[batch_kind(batch_id)]
+
+
+def s3_prefix_raw_batch(batch_id: str) -> str:
+    if batch_kind(batch_id) == "buildings":
+        return s3_prefix_raw_static("buildings")
+    return f"raw/satellite/{batch_id}/"
+
+
+def s3_key_raw_skipped(batch_id: str) -> str | None:
+    """raw/satellite/skipped/<date>.json written by satellite_ingest for cloudy dates."""
+    p = parse_period(batch_id) if batch_kind(batch_id) == "scene" else None
+    return f"raw/satellite/skipped/{p.date_start.isoformat()}.json" if p else None
+
+
 def s3_key_satellite_grid(period: str) -> str:
     p = parse_period(period)
-    return (f"processed/satellite_grid/period_type={p.period_type}/"
+    return (f"trusted/satellite_grid/period_type={p.period_type}/"
             f"year={p.year}/{period}.parquet")
 
 
 def s3_key_buildings_grid(year: int) -> str:
-    return f"processed/buildings_grid/year={year}/buildings_{year}.parquet"
+    return f"trusted/buildings_grid/year={year}/buildings_{year}.parquet"
 
 
 def s3_key_community_summary(method: str, period: str) -> str:
     if method not in METHODS:
         raise ValueError(f"unknown method: {method!r}")
     p = parse_period(period)
-    return (f"processed/community_summary/method={method}/"
+    return (f"curated/community_summary/method={method}/"
             f"year={p.year}/{period}.parquet")
+
+
+def s3_key_validation(batch_id: str) -> str:
+    return f"validation/{zone_source(batch_id)}/{batch_id}/report.json"
+
+
+def s3_prefix_quarantine_batch(batch_id: str) -> str:
+    return f"quarantine/batch/{zone_source(batch_id)}/{batch_id}/"
+
+
+def s3_key_quarantine_rows(batch_id: str) -> str:
+    return f"quarantine/rows/{zone_source(batch_id)}/{batch_id}/rows.csv"
+
+
+def s3_key_quarantine_duplicate(batch_id: str) -> str:
+    return f"quarantine/duplicate/{zone_source(batch_id)}/{batch_id}/rows.csv"
+
+
+def s3_prefix_layers(batch_id: str) -> str:
+    if batch_kind(batch_id) == "buildings":
+        return "curated/satellite/layers/static/"
+    return f"curated/satellite/layers/{batch_id}/"
+
+
+def s3_key_success(batch_id: str) -> str:
+    """Publish marker (holds the manifest hash CheckBatch compares with)."""
+    return f"curated/_success/{zone_source(batch_id)}/{batch_id}.json"

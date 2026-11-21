@@ -22,6 +22,8 @@ data "aws_iam_role" "lab" {
 module "storage" {
   source      = "./modules/storage"
   bucket_name = var.bucket_name
+  # S3 -> EventBridge for the satellite pipeline trigger (spec 51 §2)
+  eventbridge_enabled = var.satellite_pipeline_enabled
 }
 
 module "ingest" {
@@ -104,4 +106,22 @@ module "satellite" {
   ingest_schedule        = var.satellite_ingest_schedule
   ingest_max_cloud_pct   = var.satellite_max_cloud_pct
   ingest_min_valid_ratio = var.satellite_min_valid_ratio
+}
+
+# Satellite pipeline (spec 51, #30-#31, D23): raw/satellite/<batch>/_COMPLETE ->
+# Check -> Validate (contract) -> WriteTrusted -> RenderLayers -> Verify.
+# Independent of satellite_enabled: it only reads what satellite_ingest wrote to S3.
+module "satellite_pipeline" {
+  count             = var.satellite_pipeline_enabled ? 1 : 0
+  source            = "./modules/satellite_pipeline"
+  name_prefix       = var.name_prefix
+  role_arn          = data.aws_iam_role.lab.arn
+  bucket_name       = module.storage.bucket_name
+  functions_dir     = "${path.root}/../satellite/pipeline/functions"
+  common_dir        = "${path.root}/../pipeline/common"
+  contracts_dir     = "${path.root}/../pipeline/contracts"
+  statemachine_file = "${path.root}/../satellite/pipeline/statemachine/satellite-pipeline.asl.json"
+  alert_topic_arn   = module.pipeline.alert_topic_arn
+  pandas_layer_arn  = var.pandas_layer_arn
+  trigger_enabled   = var.satellite_pipeline_trigger_enabled
 }

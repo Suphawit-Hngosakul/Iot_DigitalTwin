@@ -4,3 +4,4 @@ moto[s3]>=5
 pytest
 pyarrow
 pyproj
+pyyaml        # contracts/*.yaml (Lambda อ่าน .json ที่ Terraform แปลงให้ จึงไม่ต้องมี PyYAML)

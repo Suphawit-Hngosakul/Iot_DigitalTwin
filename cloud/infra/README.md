@@ -17,6 +17,7 @@ IaC ของทุกอย่างใน `cloud/` ด้วย **Terraform/Op
 | `catalog` | 40 | #17 | Glue database `iot_walking` + ตาราง `raw_csv`, `raw_csv_unknown`, `readings_1s`, `readings_1min`, `quality` (partition projection) + Athena workgroup `iot_walking` + saved queries + lifecycle `athena-results/` 7 วัน (ใน `storage`) |
 | `api` | 40 | #18 | Lambda `iot-dt-api` (Py3.12, LabRole) + HTTP API แยก `iot-dt-api`: `GET /devices /latest /readings /quality` + CORS (`api_allowed_origins`) + log 14 วัน (`cloud/api/`) |
 | `satellite` | 50 | #25, #27 | layer `iot-dt-gee` (earthengine-api) + Lambda `iot-dt-satellite-test` และ `iot-dt-satellite-ingest` (Py3.12, LabRole, timeout 900 s) + EventBridge รายวัน `cron(0 2 * * ? *)` (ตั้งด้วย `satellite_ingest_schedule`, `""` = รันมือเท่านั้น) ยืนยันตัวกับ GEE ด้วย WIF ไม่มี key (`cloud/satellite/`) ปิดไว้เป็นค่าเริ่มต้น เปิดด้วย `satellite_enabled = true` หลังรัน `cloud/satellite/layer/build_layer.py` |
+| `satellite_pipeline` | 32, 51 | #30, #31 | Lambda 6 ตัว `iot-dt-sat-*` + Step Functions `iot-dt-sat-pipeline` + EventBridge rule `iot-dt-sat-complete` (S3 Object Created `raw/satellite/*/_COMPLETE`, ปิดด้วย `satellite_pipeline_trigger_enabled = false`) + data contracts (`cloud/pipeline/contracts/*.yaml` แปลงเป็น JSON ตอน zip) แจ้งเตือนผ่าน SNS ของ `pipeline` ปิดไว้เป็นค่าเริ่มต้น เปิดด้วย `satellite_pipeline_enabled = true` (เปิด S3 → EventBridge ของ bucket ด้วย) |
 
 ```bash
 aws s3 mb s3://iot-dt-<account-id> --region us-east-1   # สร้าง bucket เองก่อน (ดูด้านล่าง)

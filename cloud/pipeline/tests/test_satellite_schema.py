@@ -159,10 +159,10 @@ def test_s3_keys():
     assert s.s3_prefix_raw_scene("2026-03-15") == "raw/satellite/scene_2026-03-15/"
     assert s.s3_prefix_raw_static("buildings") == "raw/satellite/static=buildings/"
     assert s.s3_key_satellite_grid("season_2026_03-05") == (
-        "processed/satellite_grid/period_type=season/year=2026/season_2026_03-05.parquet")
-    assert s.s3_key_buildings_grid(2026) == "processed/buildings_grid/year=2026/buildings_2026.parquet"
+        "trusted/satellite_grid/period_type=season/year=2026/season_2026_03-05.parquet")
+    assert s.s3_key_buildings_grid(2026) == "trusted/buildings_grid/year=2026/buildings_2026.parquet"
     assert s.s3_key_community_summary("buffer_300", "year_2026") == (
-        "processed/community_summary/method=buffer_300/year=2026/year_2026.parquet")
+        "curated/community_summary/method=buffer_300/year=2026/year_2026.parquet")
     with pytest.raises(ValueError):
         s.s3_key_community_summary("buffer_1000", "year_2026")
     with pytest.raises(ValueError):
