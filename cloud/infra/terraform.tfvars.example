@@ -45,6 +45,14 @@ pipeline_schedule_enabled = true
 //    เปิดแล้ว apply จะรัน cloud/satellite/layer/build_layer.py สร้าง gee-layer.zip ให้เอง
 //    (เครื่องที่รัน terraform ต้องมี python + pip และออกเน็ตได้)
 satellite_enabled = false
+//    WIF: แต่ละ AWS account ต้องมี provider ของตัวเองใน identity pool ฝั่ง Google
+//    ใส่ provider_id ของ account นี้ (default ใน variables.tf เป็นของอีก account)
+// gee_wif = {
+//   project_number  = ""
+//   pool_id         = ""
+//   provider_id     = "<provider ของ AWS account นี้>"
+//   service_account = "service-gee-iot@turnkey-tribute-511903-t6.iam.gserviceaccount.com"
+// }
 
 // B. ตรวจ batch ด้วย data contract -> trusted/ + PNG layer (ต้องเปิด A ก่อน)
 //    หมายเหตุ: เปิดแล้ว bucket จะส่ง event ให้ EventBridge (ทับ notification อื่นของ bucket)

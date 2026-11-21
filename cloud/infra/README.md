@@ -38,11 +38,19 @@ IaC ของทุกอย่างใน `cloud/` ด้วย **Terraform/Op
 
 เครื่องที่ไม่มีของข้างบน ใช้ **AWS CloudShell** แทนได้ (มี aws, bash, python, git อยู่แล้ว ต้องติดตั้ง Terraform เอง และไม่ต้องตั้ง credentials)
 
-**CloudShell: home มีพื้นที่แค่ 1 GB** provider AWS ใน `.terraform/` ใช้หลายร้อย MB รวมกับ GEE layer แล้วเต็ม ทำให้ apply สร้าง resource ได้แต่ **บันทึก state ไม่ได้** ให้เก็บ provider ไว้ที่ `/tmp` ทุกครั้งที่เปิด CloudShell ก่อน `terraform init`:
+**CloudShell: เตรียมเครื่องด้วยสคริปต์** (รันซ้ำได้ทุกครั้งที่ได้ CloudShell ใหม่ ไม่แตะ state หรือ resource)
 ```bash
-export TF_DATA_DIR=/tmp/tf-data     # /tmp หายเมื่อปิด session -> init ใหม่ได้ ส่วน terraform.tfstate ยังอยู่ใน home
-terraform init
+cd ~                                               # clone ใน home เท่านั้น: /tmp ถูกล้างทุกครั้งที่ session เริ่มใหม่
+git clone https://github.com/suphawit-hngosakul/iot_digitaltwin.git
+cd iot_digitaltwin && git checkout develop
+bash cloud/infra/setup-cloudshell.sh
+source ~/.bashrc
 ```
+`setup-cloudshell.sh` ติดตั้ง Terraform 1.9.8 ลง `~/bin` (ข้ามถ้ามีแล้ว, เปลี่ยนเวอร์ชันด้วย `TF_VERSION=...`), เพิ่ม `PATH` กับ `TF_DATA_DIR=/tmp/tf-data` ลง `~/.bashrc`, เช็ก aws / python3 / pip / git, credentials, ว่า repo อยู่ใน home ไม่ใช่ `/tmp`, มี `terraform.tfvars` หรือยัง และพื้นที่ home เหลือพอ
+
+ทำไมต้อง `TF_DATA_DIR`: home ของ CloudShell มีแค่ 1 GB provider AWS ใน `.terraform/` ใช้หลายร้อย MB รวมกับ GEE layer แล้วเต็ม ทำให้ apply สร้าง resource ได้แต่ **บันทึก state ไม่ได้** จึงเก็บ provider ไว้ใน `/tmp` แทน (หายเมื่อ session เริ่มใหม่ ให้ `terraform init` ใหม่ ส่วน `terraform.tfstate` อยู่ใน home ไม่หาย)
+
+Windows (PowerShell): `winget install --id Hashicorp.Terraform -e` แล้วเปิด terminal ใหม่ หรือดาวน์โหลด zip จาก https://developer.hashicorp.com/terraform/install แล้ววาง `terraform.exe` ในโฟลเดอร์ที่อยู่ใน `PATH`
 
 ### ขั้น 1: ตั้ง credentials ของ AWS
 
@@ -55,7 +63,12 @@ credentials ของ Learner Lab หมดอายุทุก session (เจ
 
 ### ขั้น 2: เอาโค้ดมา
 
+clone ไว้ใน **home** (`cd ~` ก่อน) ห้ามไว้ใน `/tmp` เพราะ CloudShell ล้าง `/tmp` ทุกครั้งที่ session เริ่มใหม่
+
+บน CloudShell ถ้าทำตามขั้น 0 แล้ว ข้ามขั้นนี้ได้ (clone ไปแล้ว)
+
 ```bash
+cd ~
 git clone https://github.com/suphawit-hngosakul/iot_digitaltwin.git
 cd iot_digitaltwin
 git checkout develop            # branch หลัก
@@ -93,6 +106,7 @@ terraform apply
 ```
 
 สิ่งที่เกิดขึ้นตอน apply ครั้งแรก:
+- state เก็บใน `terraform.tfstate` ข้าง `main.tf` (ใน home ของ CloudShell ไม่หายเมื่อปิด session) ถ้าไฟล์นี้หาย Terraform จะจำ resource ที่สร้างไปไม่ได้ ควรสำรองไว้หลัง apply เช่น `aws s3 cp terraform.tfstate s3://<bucket>/backup/terraform.tfstate`
 - module `storage` สร้าง S3 bucket ด้วย AWS CLI (`terraform_data` + `local-exec`) ถ้ามี bucket ชื่อนี้อยู่แล้วจะข้ามไป
 - ได้ Lambda ingest + HTTP API, Step Functions pipeline + Scheduler ทุกชั่วโมงนาทีที่ 5 (เวลาไทย), Glue database `iot_walking` + Athena workgroup, API ให้เว็บ, และ EC2 relay + Elastic IP + realtime hub
 - EC2 ติดตั้ง relay/hub เองผ่าน user-data ตอนบูตครั้งแรก รอประมาณ 2-3 นาทีหลัง apply จบ service ถึงจะขึ้น (ตั้ง `systemd enable` ไว้ ถ้า Learner Lab หยุดเครื่องแล้วเปิดใหม่ service จะขึ้นเอง และ Elastic IP คงเดิม)
@@ -109,6 +123,12 @@ terraform output api_url           # API ของเว็บ
 
 ### ขั้น 5: ยืนยันอีเมล + ตั้งค่าบอร์ด + ตรวจผล
 
+ตรวจทั้งระบบในคำสั่งเดียว (รันใน `cloud/infra` ได้ทุกเมื่อ ไม่แก้อะไรในระบบ):
+```bash
+bash healthcheck.sh            # เพิ่ม --no-gee ถ้าไม่อยากเรียก GEE
+```
+แสดง PASS / WARN / FAIL ทีละส่วน: credentials, bucket, ingest, relay, hub, API, Lambda, Step Functions (รันล่าสุด), schedule, อีเมล SNS, Glue/Athena, GEE และจำนวนไฟล์ในแต่ละ zone ของ bucket WARN คือยังไม่พร้อมแต่ไม่ใช่ความผิดพลาด (เช่น ยังไม่มีข้อมูล ยังไม่กดยืนยันอีเมล) ถ้ามี FAIL จะจบด้วย exit 1
+
 1. **ยืนยันอีเมล SNS:** เปิดอีเมลจาก AWS Notifications แล้วกด *Confirm subscription* ไม่งั้นจะไม่ได้รับแจ้งเตือน
 2. **ตั้งบอร์ด** (บัญชีใหม่ = Elastic IP ใหม่ ต้องแก้และ flash ใหม่): ใส่ `relay_url` กับ `hub_device_url` และ token ของอุปกรณ์นั้นใน `secrets.h` ดูวิธีใน `iot/firmware/README.md`
 3. **ตรวจว่าข้อมูลเข้า:** หลังบอร์ดอัปโหลดไฟล์แล้ว ดูว่ามีไฟล์ใน `s3://<bucket>/raw/csv/` (`aws s3 ls s3://<bucket>/raw/csv/ --recursive | head`) pipeline รันเองทุกชั่วโมง นาทีที่ 5 หรือรันมือตาม `cloud/pipeline/README.md`
@@ -122,6 +142,8 @@ terraform output api_url           # API ของเว็บ
 **ทำก่อน (นอก AWS):** ฝั่ง Google ต้องให้ AWS account ใหม่เข้ามาได้ เพราะ Lambda ยืนยันตัวกับ GEE ด้วย WIF ของ project ที่เป็นของ Get ต้องขอให้เจ้าของ project:
 - เพิ่ม AWS account id ใหม่ให้ AWS provider ของ identity pool (`gee_wif.pool_id` / `provider_id`)
 - ให้สิทธิ์ `roles/iam.workloadIdentityUser` กับ principal ของ `LabRole` ของบัญชีใหม่ บน service account `gee_wif.service_account`
+
+แต่ละ AWS account ใช้ **provider คนละตัว** ใน pool เดียวกัน (provider ผูกกับ account id) ค่า default ของ `gee_wif.provider_id` ใน `variables.tf` เป็นของอีก account ถ้า account นี้มี provider แล้ว ให้ override ใน `terraform.tfvars` เช่น `gee_wif = { project_number = "959910184696", pool_id = "6609650251", provider_id = "aws-view", service_account = "service-gee-iot@turnkey-tribute-511903-t6.iam.gserviceaccount.com" }` อาการถ้าใช้ provider ผิดตัว: `invalid_grant: Specified AWS account ID ... not found in the configured identity provider`
 
 ถ้ายังไม่ทำ Lambda จะได้ error ตอนแลก token ไม่ใช่ปัญหาของ Terraform รายละเอียดดู `cloud/satellite/README.md`
 
@@ -163,7 +185,7 @@ terraform apply -target=module.catalog -target=module.curated_merge
 
 | อาการ | สาเหตุ / วิธีแก้ |
 |---|---|
-| `no space left on device` ตอน apply (CloudShell) | home เต็ม: **อย่าปิดหน้าต่างและอย่า apply ซ้ำ** ลบ `~/.cache/pip`, `cloud/satellite/layer/build/`, `.terraform/` แล้วคัดลอก JSON ของ state ที่ Terraform พิมพ์ไว้ในหน้าจอ (ตั้งแต่ `{` แรกถึง `}` สุดท้าย) ลง `errored.tfstate` แล้ว `terraform state push errored.tfstate` จากนั้นตั้ง `TF_DATA_DIR` ตามขั้น 0 แล้ว init + apply ใหม่ ถ้ากู้ state ไม่ได้ ใน Learner Lab กด Reset lab แล้วเริ่มใหม่ |
+| `no space left on device` ตอน apply (CloudShell) | home เต็ม: **อย่าปิดหน้าต่างและอย่า apply ซ้ำ** ลบ `~/.cache/pip`, `cloud/satellite/layer/build/`, `.terraform/` (รัน `bash setup-cloudshell.sh` ดูพื้นที่ที่เหลือได้) แล้วคัดลอก JSON ของ state ที่ Terraform พิมพ์ไว้ในหน้าจอ (ตั้งแต่ `{` แรกถึง `}` สุดท้าย) ลง `errored.tfstate` แล้ว `terraform state push errored.tfstate` จากนั้นตั้ง `TF_DATA_DIR` ตามขั้น 0 แล้ว init + apply ใหม่ ถ้ากู้ state ไม่ได้ ใน Learner Lab กด Reset lab แล้วเริ่มใหม่ |
 | `ExpiredToken` / `InvalidClientTokenId` | credentials ของ Learner Lab หมดอายุ ทำขั้น 1 ใหม่ |
 | apply ล้มตอน `terraform_data.bucket` (`aws: command not found` / `bash`) | เครื่องไม่มี aws หรือ bash ใช้ CloudShell หรือสร้าง bucket เอง `aws s3api create-bucket --bucket <ชื่อ> --region us-east-1` แล้ว apply ซ้ำ (จะข้ามการสร้าง) |
 | `BucketAlreadyExists` | ชื่อ bucket ซ้ำทั่วโลก เปลี่ยน `bucket_name` |
