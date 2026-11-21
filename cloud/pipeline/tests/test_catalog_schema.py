@@ -68,6 +68,17 @@ def test_satellite_grid_location_matches_writer():
     assert set(values.split(",")) == {"scene", "season"}
 
 
+def test_buildings_grid_matches_satellite_schema():
+    text = CATALOG_TF.read_text(encoding="utf-8")
+    assert _columns(text, "buildings_grid_columns = [") == list(satellite_schema.BUILDINGS_GRID)
+    assert (_columns(text, "buildings_grid_partitions = [")
+            == list(satellite_schema.BUILDINGS_GRID_PARTITIONS))
+    m = re.search(r'/(trusted/buildings_grid/year=\$\$\{year\}/)"', text)
+    assert m, "buildings_grid storage.location.template not found"
+    key = satellite_schema.s3_key_buildings_grid(2025)
+    assert key.startswith(m.group(1).replace("$${year}", "2025"))
+
+
 def test_partition_keys_not_in_columns():
     text = CATALOG_TF.read_text(encoding="utf-8")
     keys = {k for k, _ in schema.PARTITION_KEYS} | {"hour"}
