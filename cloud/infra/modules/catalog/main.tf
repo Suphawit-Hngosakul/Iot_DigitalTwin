@@ -10,6 +10,10 @@
 # (spec 30 §2). A date/integer projection cannot see 'unknown', so they get
 # their own table raw_csv_unknown (decided in #17). Processed tables only hold
 # rows with a valid time.
+#
+# satellite_grid (spec 51 §4, #31) uses the same approach with its own keys:
+#   period_type = enum scene,season  (trusted/satellite_grid/period_type=<t>/)
+#   year        = integer satellite_year_range (Landsat 8 starts 2013)
 
 variable "bucket_name" {
   type = string
@@ -38,6 +42,12 @@ variable "date_start" {
 variable "bytes_scanned_cutoff" {
   description = "Athena stops a query that scans more than this many bytes (protects the lab budget)"
   type        = number
+}
+
+variable "satellite_year_range" {
+  description = "First,last year in the satellite_grid year projection (integer range, no NOW)"
+  type        = string
+  default     = "2013,2035"
 }
 
 locals {
@@ -284,6 +294,77 @@ resource "aws_glue_catalog_table" "processed" {
   }
 }
 
+# --- trusted satellite grid (spec 51 §4, #31) ------------------------------
+# One Parquet per batch from WriteTrusted (cloud/satellite/pipeline):
+#   trusted/satellite_grid/period_type=<scene|season>/year=<YYYY>/<period>.parquet
+# Must match satellite_schema.SATELLITE_GRID / SATELLITE_GRID_PARTITIONS in
+# cloud/pipeline/common/satellite_schema.py (checked by tests/test_catalog_schema.py).
+locals {
+  satellite_grid_partitions = [
+    ["period_type", "string"],
+    ["year", "int"],
+  ]
+  satellite_grid_columns = [
+    ["cell_id", "string"],
+    ["period", "string"],
+    ["date_start", "date"],
+    ["date_end", "date"],
+    ["n_scenes", "int"],
+    ["clear_obs_mean", "double"],
+    ["valid_pixel_ratio", "double"],
+    ["lst_mean", "double"],
+    ["lst_p90", "double"],
+    ["ndvi_mean", "double"],
+    ["ndbi_mean", "double"],
+    ["green_ratio", "double"],
+  ]
+}
+
+resource "aws_glue_catalog_table" "satellite_grid" {
+  database_name = aws_glue_catalog_database.this.name
+  name          = "satellite_grid"
+  description   = "Landsat LST/NDVI/NDBI per 90 m cell, one file per scene/season (trusted/satellite_grid/, spec 51)"
+  table_type    = "EXTERNAL_TABLE"
+
+  parameters = {
+    "classification"                = "parquet"
+    "parquet.compression"           = "SNAPPY"
+    "projection.enabled"            = "true"
+    "projection.period_type.type"   = "enum"
+    "projection.period_type.values" = "scene,season"
+    "projection.year.type"          = "integer"
+    "projection.year.range"         = var.satellite_year_range
+    "storage.location.template"     = "${local.bucket_uri}/trusted/satellite_grid/period_type=$${period_type}/year=$${year}/"
+  }
+
+  dynamic "partition_keys" {
+    for_each = local.satellite_grid_partitions
+    content {
+      name = partition_keys.value[0]
+      type = partition_keys.value[1]
+    }
+  }
+
+  storage_descriptor {
+    location      = "${local.bucket_uri}/trusted/satellite_grid/"
+    input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+    output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+
+    ser_de_info {
+      serialization_library = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+      parameters            = { "serialization.format" = "1" }
+    }
+
+    dynamic "columns" {
+      for_each = local.satellite_grid_columns
+      content {
+        name = columns.value[0]
+        type = columns.value[1]
+      }
+    }
+  }
+}
+
 # --- Athena ----------------------------------------------------------------
 resource "aws_athena_workgroup" "this" {
   name          = var.workgroup_name
@@ -311,11 +392,12 @@ resource "aws_athena_workgroup" "this" {
 # Example queries, visible in the Athena console under "Saved queries".
 locals {
   named_queries = {
-    "readings-1min-one-day"  = "1 device x 1 day of readings_1min (done-check of #17: <= 5 s)"
-    "readings-1s-one-hour"   = "1 device x 1 hour of readings_1s"
-    "quality-per-day"        = "Loss rate per device per day"
-    "raw-rows-per-hour"      = "Raw CSV rows per hour vs processed rows (pipeline check)"
-    "raw-unknown-time-count" = "Rows without a trusted time per device / session (RTC problems)"
+    "readings-1min-one-day"    = "1 device x 1 day of readings_1min (done-check of #17: <= 5 s)"
+    "readings-1s-one-hour"     = "1 device x 1 hour of readings_1s"
+    "quality-per-day"          = "Loss rate per device per day"
+    "raw-rows-per-hour"        = "Raw CSV rows per hour vs processed rows (pipeline check)"
+    "raw-unknown-time-count"   = "Rows without a trusted time per device / session (RTC problems)"
+    "satellite-grid-per-batch" = "satellite_grid cells / LST per scene or season (done-check of #31)"
   }
 }
 
