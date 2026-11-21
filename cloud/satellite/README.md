@@ -16,12 +16,13 @@
 ## สร้าง layer แล้ว deploy
 
 ```bash
-python cloud/satellite/layer/build_layer.py      # -> cloud/satellite/layer/build/gee-layer.zip (~30 MB)
 # ใน cloud/infra/terraform.tfvars: satellite_enabled = true
-cd cloud/infra && terraform apply
+cd cloud/infra && terraform apply   # รัน build_layer.py ให้เอง -> layer/build/gee-layer.zip (~30 MB)
 ```
 
-- `build_layer.py` ดึง wheel ของ manylinux x86_64 / Python 3.12 ให้เอง รันบน Windows ได้
+- Terraform รัน `build_layer.py` ให้เองตอน apply ครั้งแรก และรันใหม่เฉพาะตอน `requirements.txt` หรือ `build_layer.py` เปลี่ยน เครื่องที่รัน Terraform ต้องมี Python + pip และออกเน็ตได้ (ตั้ง `python_cmd = "python3"` ถ้าเครื่องไม่มีคำสั่ง `python`)
+- ถ้ามี zip สำเร็จรูปอยู่แล้ว ตั้ง `gee_layer_zip` แทน Terraform จะไม่ build เอง
+- `build_layer.py` ดึง wheel ของ manylinux x86_64 / Python 3.12 ให้เอง รันบน Windows ได้ (รันมือก็ได้ถ้าอยากเช็กก่อน)
 - zip อยู่ใน `build/` ที่ gitignore ไว้ ห้าม commit ไฟล์ zip ถ้าจะเปลี่ยนเวอร์ชันให้แก้ `layer/requirements.txt`
 - `satellite_enabled = true` สร้างทั้ง layer, test Lambda และ `satellite_ingest` + EventBridge รายวันในครั้งเดียว (ใช้ layer และค่า WIF ชุดเดียวกัน)
 

@@ -22,6 +22,7 @@ data "aws_iam_role" "lab" {
 module "storage" {
   source      = "./modules/storage"
   bucket_name = var.bucket_name
+  region      = var.region
   # S3 -> EventBridge for the satellite pipeline trigger (spec 51 §2)
   eventbridge_enabled = var.satellite_pipeline_enabled
 }
@@ -88,7 +89,8 @@ module "api" {
 }
 
 # GEE Lambdas via Workload Identity Federation (spec 50): test (#25) + satellite_ingest (#27).
-# Off by default: needs gee-layer.zip built by cloud/satellite/layer/build_layer.py.
+# Off by default. gee-layer.zip is built on apply by cloud/satellite/layer/build_layer.py
+# (needs python + pip + internet on the machine running terraform), unless gee_layer_zip is set.
 module "satellite" {
   count        = var.satellite_enabled ? 1 : 0
   source       = "./modules/satellite"
@@ -96,9 +98,12 @@ module "satellite" {
   role_arn     = data.aws_iam_role.lab.arn
   handler_file = "${path.root}/../satellite/test_lambda/handler.py"
   layer_zip    = var.gee_layer_zip != "" ? var.gee_layer_zip : "${path.root}/../satellite/layer/build/gee-layer.zip"
-  gee_project  = var.gee_project
-  gee_assets   = var.gee_assets
-  gee_wif      = var.gee_wif
+  # Build the zip on apply only when no prebuilt zip is given.
+  layer_build_script = var.gee_layer_zip != "" ? "" : "${path.root}/../satellite/layer/build_layer.py"
+  python_cmd         = var.python_cmd
+  gee_project        = var.gee_project
+  gee_assets         = var.gee_assets
+  gee_wif            = var.gee_wif
 
   # satellite_ingest (#27): Landsat -> S3 raw/satellite/, same layer + WIF as the test Lambda
   ingest_source_dir      = "${path.root}/../satellite/ingest"

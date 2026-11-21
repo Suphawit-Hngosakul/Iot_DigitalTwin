@@ -10,13 +10,38 @@ variable "eventbridge_enabled" {
   default     = false
 }
 
-# Learner Lab: the bucket is created OUTSIDE Terraform (aws s3 mb, see
-# cloud/infra/README.md). The aws_s3_bucket resource always reads the bucket's
-# Object Lock configuration, and the Learner Lab SCP denies
-# s3:GetBucketObjectLockConfiguration (403) -> apply fails. So Terraform only
-# manages the settings below, on a bucket that already exists.
+variable "region" {
+  type    = string
+  default = "us-east-1"
+}
+
+# Learner Lab: the aws_s3_bucket resource always reads the bucket's Object Lock
+# configuration, and the Learner Lab SCP denies s3:GetBucketObjectLockConfiguration
+# (403) -> plan/apply fails (c3d9ba3). So the bucket is created with the AWS CLI
+# from Terraform (needs `aws` on PATH: CloudShell has it) and Terraform manages only
+# the settings below. Idempotent: an existing bucket is left as it is.
+# `terraform destroy` does NOT delete the bucket or its data (delete it by hand).
+resource "terraform_data" "bucket" {
+  input = var.bucket_name
+
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    command     = <<-EOT
+      if aws s3api head-bucket --bucket "${var.bucket_name}" 2>/dev/null; then
+        echo "bucket ${var.bucket_name} exists"
+      elif [ "${var.region}" = "us-east-1" ]; then
+        aws s3api create-bucket --bucket "${var.bucket_name}" --region us-east-1
+      else
+        aws s3api create-bucket --bucket "${var.bucket_name}" --region "${var.region}" \
+          --create-bucket-configuration LocationConstraint="${var.region}"
+      fi
+    EOT
+  }
+}
+
 locals {
-  bucket_name = var.bucket_name
+  # .output (not var.bucket_name) so every resource that uses the bucket waits for it
+  bucket_name = terraform_data.bucket.output
   bucket_arn  = "arn:aws:s3:::${var.bucket_name}"
 }
 

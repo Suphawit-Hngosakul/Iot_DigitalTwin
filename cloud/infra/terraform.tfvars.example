@@ -1,5 +1,5 @@
 # คัดลอกเป็น terraform.tfvars แล้วใส่ค่าจริง (ห้าม commit terraform.tfvars)
-bucket_name = "iot-dt-<account-id>"
+bucket_name = "digitaltwin-lake-<account-id>"   # data lake เดียวของ IoT + ดาวเทียม (แยกด้วย prefix)
 
 # ได้จาก: python cloud/ingest/make_token.py <device_id>  (ใส่แค่ hash)
 device_token_hashes = {
@@ -28,9 +28,11 @@ pandas_layer_arn = "arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Pyt
 # API ให้เว็บ (#18) ไม่ใส่ = เปิด CORS ทุกโดเมน ("*") ใส่โดเมนเว็บจริงเมื่อ #35 ขึ้นแล้ว
 # api_allowed_origins = ["http://<web-bucket>.s3-website-us-east-1.amazonaws.com"]
 
-# GEE layer + test Lambda (#25) + satellite_ingest (#27) ปิดไว้ก่อน เปิดหลังสร้าง layer: python cloud/satellite/layer/build_layer.py
+# GEE layer + test Lambda (#25) + satellite_ingest (#27) ปิดไว้ก่อน
+# เปิดแล้ว apply จะรัน cloud/satellite/layer/build_layer.py สร้าง gee-layer.zip ให้เอง (ต้องมี python + pip)
 satellite_enabled = false
-# gee_layer_zip = "C:/path/to/gee-layer.zip"   # ว่าง = cloud/satellite/layer/build/gee-layer.zip
+# python_cmd    = "python3"                     # ค่าเริ่มต้น "python"
+# gee_layer_zip = "C:/path/to/gee-layer.zip"   # ตั้งเมื่อมี zip สำเร็จรูป = ไม่ build เอง
 # gee_project   = "turnkey-tribute-511903-t6"
 # gee_assets    = "projects/turnkey-tribute-511903-t6/assets/laksi_boundary"
 # ค่า WIF (gee_wif) ใช้ default ใน variables.tf ถ้าเปลี่ยน project (spec 50 ทาง ข) ค่อย override
