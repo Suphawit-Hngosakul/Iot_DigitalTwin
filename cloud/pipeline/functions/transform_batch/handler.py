@@ -1,9 +1,11 @@
 """TransformBatch Lambda (issue #15, #29, spec 30 §4, spec 01 §4).
 
 Combines every raw part of the hour into ONE Parquet file per table:
-  processed/readings_1s/device_id=<id>/date=<d>/<batch_id>.parquet
-  processed/readings_1min/...                    (mean/max/min, no Leq — D19)
-  processed/quality/...                          (one row per session)
+  trusted/iot_readings_1s/device_id=<id>/date=<d>/<batch_id>.parquet
+  curated/readings_1min/...                      (mean/max/min, no Leq — D19)
+  trusted/iot_quality/...                        (one row per session)
+Rejected rows go to quarantine/rows/iot/<batch_id>/rows.csv (invalid) and
+quarantine/duplicate/iot/<batch_id>/rows.csv (duplicates); no file when none.
 Overwrites the batch's files (idempotent). Raw is not touched.
 
 Rows: duplicates and DROP-flagged rows removed (batch_eval), values nulled by
@@ -155,9 +157,19 @@ def transform(s3, bucket: str, event: dict, devices) -> dict:
     }
     keys = {}
     for name, rows in tables.items():
-        key = schema.s3_key_processed(name, batch_id)
+        key = schema.s3_key_table(name, batch_id)
         s3.put_object(Bucket=bucket, Key=key, Body=to_parquet(name, rows))
         keys[name] = key
+    quarantined = {}
+    for bucket_name, qkey in (("invalid", schema.s3_key_quarantine_rows(batch_id)),
+                              ("duplicate", schema.s3_key_quarantine_duplicate(batch_id))):
+        body = batch_eval.rows_csv(ev, bucket_name)
+        if body is None:
+            # re-run after the cause is gone: do not leave a stale file behind
+            s3.delete_object(Bucket=bucket, Key=qkey)
+            continue
+        s3.put_object(Bucket=bucket, Key=qkey, Body=body, ContentType="text/csv")
+        quarantined[bucket_name] = qkey
     return {
         "raw_rows": ev.raw_rows,
         "kept_rows": len(recs),
@@ -166,6 +178,7 @@ def transform(s3, bucket: str, event: dict, devices) -> dict:
         "minutes": len(tables["readings_1min"]),
         "gps_speed_nulled": nulled,
         "keys": keys,
+        "quarantine": quarantined,
     }
 
 

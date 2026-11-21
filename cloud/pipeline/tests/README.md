@@ -61,7 +61,7 @@ python -m pytest -q
 | `test_batch_id_roundtrip` | สร้าง `IOTW-A001__2026-11-16__08` แล้วแยกกลับได้ค่าเดิม |
 | `test_batch_id_bad` (5 กรณี) | ชั่วโมง 24, เดือน 13, คั่นด้วย `_` เดียว, device_id มีช่องว่าง, ไม่มี device_id → error |
 | `test_device_id_cannot_hold_separator` | device_id ที่มี `__` → error |
-| `test_s3_keys` | path ของ raw (มี/ไม่มีเวลา), processed, report, quarantine, manifest ถูกรูป และ chunk_id/ชื่อตารางผิด → error |
+| `test_s3_keys` | path ของ raw (มี/ไม่มีเวลา), trusted/curated, report, quarantine (batch/rows/duplicate), manifest ถูกรูป และ chunk_id/ชื่อตารางผิด → error |
 | `test_raw_partition_from_raw_dict` | แถว CSV ดิบ → `("2026-11-16", "08")` |
 
 ### ตาราง Parquet
@@ -109,7 +109,7 @@ python -m pytest -q
 | `test_weighted_helpers` | ค่าเฉลี่ยถ่วงน้ำหนักและ quantile ถ่วงน้ำหนักถูก |
 | `test_summarize_community` | สรุปชุมชน 3 เซลล์ (1 เซลล์เมฆบัง, 1 เซลล์ไม่มีข้อมูลอาคาร) ได้ lst_mean, p90, n_scenes, builtup_pct, building_count ตามคำนวณมือ |
 | `test_summarize_without_buildings_and_missing_cells` | ไม่มีข้อมูลดาวเทียม/อาคาร → null, ไม่มีเซลล์ → error |
-| `test_s3_keys` | path ของ raw/processed ถูกรูป และชื่อผิด → error |
+| `test_s3_keys` | path ของ raw/trusted/curated ถูกรูป และชื่อผิด → error |
 
 ## ยังไม่มี (ต้องทำก่อนปิด #2)
 

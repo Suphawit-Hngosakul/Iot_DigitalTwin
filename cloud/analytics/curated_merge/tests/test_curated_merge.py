@@ -192,13 +192,13 @@ def test_plan_picks_unmerged_scene_and_season_but_not_year_composites(s3):
 
 def test_plan_adds_month_for_iot_manifest_with_latest_season(s3):
     _published(s3, "season_2025_03-05")
-    _put(s3, "processed/_manifests/IOTW-A001__2026-11-16__08.json")
+    _put(s3, "curated/_success/iot/IOTW-A001__2026-11-16__08.json")
     got = {p["period"]: p["sat_period"] for p in _plan(s3)["periods"]}
     assert got["month_2026-11"] == "season_2025_03-05"
 
 
 def test_plan_skips_month_without_any_season(s3):
-    _put(s3, "processed/_manifests/IOTW-A001__2026-11-16__08.json")
+    _put(s3, "curated/_success/iot/IOTW-A001__2026-11-16__08.json")
     assert _plan(s3)["count"] == 0
 
 
@@ -222,11 +222,11 @@ def test_plan_remerges_when_buildings_or_iot_arrive_later(s3):
     assert _plan(s3)["count"] == 1                                    # satellite marker newer than start
     _merge_marker(s3, "scene_2026-11-16", "scene_2026-11-16", datetime.now(timezone.utc) + timedelta(minutes=1))
     assert _plan(s3)["count"] == 0
-    _put(s3, "processed/_manifests/IOTW-A001__2026-11-18__10.json")    # inside +-7 days, newer
+    _put(s3, "curated/_success/iot/IOTW-A001__2026-11-18__10.json")    # inside +-7 days, newer
     later = datetime.now(timezone.utc) - timedelta(minutes=5)
     _merge_marker(s3, "scene_2026-11-16", "scene_2026-11-16", later)
     assert "scene_2026-11-16" in {p["period"] for p in _plan(s3)["periods"]}
-    _put(s3, "processed/_manifests/IOTW-A001__2026-12-30__10.json")    # outside the range
+    _put(s3, "curated/_success/iot/IOTW-A001__2026-12-30__10.json")    # outside the range
     _merge_marker(s3, "scene_2026-11-16", "scene_2026-11-16", datetime.now(timezone.utc) + timedelta(minutes=1))
     assert "scene_2026-11-16" not in {p["period"] for p in _plan(s3)["periods"]}
 

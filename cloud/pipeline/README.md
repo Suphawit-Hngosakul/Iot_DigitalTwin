@@ -10,7 +10,7 @@ cloud/pipeline/
 │   ├── check_batch/
 │   ├── validate_batch/
 │   ├── transform_batch/   # รวม raw ทุก part ของชั่วโมงเป็น Parquet 1 ไฟล์ต่อตาราง
-│   ├── verify_batch/      # นับแถว raw = processed + dropped แล้วเขียน manifest
+│   ├── verify_batch/      # นับแถว raw = trusted + quarantine/rows + duplicate แล้วเขียน manifest
 │   └── quarantine_batch/
 ├── common/        # schema.py, batch_manifest.py, batch_eval.py, devices.csv, grid.py
 └── tests/         # pytest + CSV ตัวอย่าง (ดี/เสีย/ซ้ำ/ขาด)
@@ -37,8 +37,8 @@ PlanBatches → Map (ทีละ 4 batch) → CheckBatch
 ```
 
 - `batch_eval.py` ใช้ร่วมกันโดย Validate/Transform: อ่าน raw ชุดเดียวกันแล้วตัดสินแถวเหมือนกันทุกครั้ง จึงไม่ต้องส่ง flag รายแถวผ่าน Step Functions (จำกัด 256 KB)
-- ทุกแถวดิบตกอยู่ในกลุ่มเดียว: kept / duplicate / invalid ดังนั้น `raw = processed + duplicate + invalid` คือสิ่งที่ VerifyBatch ตรวจ
-- `processed/_manifests/<batch_id>.json` คือเครื่องหมายว่า publish แล้ว (แทน `_SUCCESS`) เก็บ `manifest_hash` ที่ CheckBatch เห็น
+- ทุกแถวดิบตกอยู่ในกลุ่มเดียว: kept / duplicate / invalid ดังนั้น `raw = trusted + duplicate + invalid` คือสิ่งที่ VerifyBatch ตรวจ
+- `curated/_success/iot/<batch_id>.json` คือเครื่องหมายว่า publish แล้ว (แทน `_SUCCESS`) เก็บ `manifest_hash` ที่ CheckBatch เห็น
 - Map ตั้ง `ToleratedFailurePercentage: 100`: batch หนึ่งพังไม่หยุด batch อื่น ส่งอีเมลแจ้งทุกครั้ง แต่ execution รวมยังจบ Succeeded ให้ดู batch ที่พังจากอีเมลหรือหน้า Map run
 
 ## รันมือ

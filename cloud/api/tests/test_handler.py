@@ -78,7 +78,7 @@ def athena(monkeypatch):
 
 
 def publish(s3, batch_id, published_at="2026-11-16T02:10:00+00:00"):
-    s3.put_object(Bucket=BUCKET, Key=f"processed/_manifests/{batch_id}.json",
+    s3.put_object(Bucket=BUCKET, Key=f"curated/_success/iot/{batch_id}.json",
                   Body=json.dumps({"batch_id": batch_id, "published_at": published_at}))
 
 

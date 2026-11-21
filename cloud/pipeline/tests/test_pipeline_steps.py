@@ -94,7 +94,7 @@ def run_all(s3, devices=DEVICES, batch_id=BATCH):
 
 
 def read_table(s3, table, batch_id=BATCH):
-    body = s3.get_object(Bucket=BUCKET, Key=schema.s3_key_processed(table, batch_id))["Body"].read()
+    body = s3.get_object(Bucket=BUCKET, Key=schema.s3_key_table(table, batch_id))["Body"].read()
     return pq.read_table(io.BytesIO(body)).to_pylist()
 
 
@@ -241,13 +241,45 @@ def test_transform_tables(s3):
     assert json.loads(q["flag_counts"])["DUPLICATE"] == 3
 
 
+def _object(s3, key):
+    return s3.get_object(Bucket=BUCKET, Key=key)["Body"].read().decode()
+
+
+def test_transform_writes_rejected_rows_to_quarantine(s3):
+    import csv, io
+    rows = [row(i, f"2026-11-16 08:00:{i:02d}") for i in range(1, 10)]
+    rows.append(row(10, "2026-11-16 09:00:10"))            # OUT_OF_BATCH_HOUR -> invalid
+    put(s3, "12-1-10", to_csv(rows))
+    put(s3, "12-1-2", to_csv(rows[:2]))                    # overlapping chunk -> 2 duplicates
+    ev = run_all(s3)
+    t = ev["transform"]
+    assert t["quarantine"] == {"invalid": schema.s3_key_quarantine_rows(BATCH),
+                               "duplicate": schema.s3_key_quarantine_duplicate(BATCH)}
+    bad = list(csv.DictReader(io.StringIO(_object(s3, schema.s3_key_quarantine_rows(BATCH)))))
+    assert len(bad) == 1 and bad[0]["Record_ID"] == "10"
+    assert "OUT_OF_BATCH_HOUR" in bad[0]["reason"] and bad[0]["source_file"].endswith("part-12-1-10.csv")
+    dup = list(csv.DictReader(io.StringIO(_object(s3, schema.s3_key_quarantine_duplicate(BATCH)))))
+    assert [d["Record_ID"] for d in dup] == ["1", "2"]
+    # Verify: raw 12 = trusted 9 + quarantined 1 + duplicate 2
+    assert ev["verify"]["rows"] == {"raw": 12, "trusted": 9, "quarantined": 1, "duplicate": 2}
+
+
+def test_clean_batch_writes_no_quarantine_files_and_rerun_removes_stale(s3):
+    put(s3, "12-1-4", (FIXTURES / "good.csv").read_bytes())
+    stale = schema.s3_key_quarantine_rows(BATCH)
+    s3.put_object(Bucket=BUCKET, Key=stale, Body=b"old")
+    ev = run_all(s3)
+    assert ev["transform"]["quarantine"] == {}
+    assert "Contents" not in s3.list_objects_v2(Bucket=BUCKET, Prefix="quarantine/rows/iot/")
+
+
 def test_one_parquet_per_table_per_hour(s3):
     for i in range(3):
         rows = [row(r, f"2026-11-16 08:{r // 60:02d}:{r % 60:02d}") for r in range(i * 10 + 1, i * 10 + 11)]
         put(s3, f"12-{i * 10 + 1}-{i * 10 + 10}", to_csv(rows))
     run_all(s3)
-    keys = [o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET, Prefix="processed/readings_1s/")["Contents"]]
-    assert keys == [schema.s3_key_processed("readings_1s", BATCH)]
+    keys = [o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET, Prefix="trusted/iot_readings_1s/")["Contents"]]
+    assert keys == [schema.s3_key_table("readings_1s", BATCH)]
     assert len(read_table(s3, "readings_1s")) == 30
 
 
@@ -275,7 +307,7 @@ def test_station_uses_registry_position(s3):
 def test_verify_publishes_then_check_says_already_processed(s3):
     put(s3, "12-1-4", (FIXTURES / "good.csv").read_bytes())
     ev = run_all(s3)
-    assert ev["verify"]["rows"] == {"raw": 4, "processed": 4, "dropped": 0}
+    assert ev["verify"]["rows"] == {"raw": 4, "trusted": 4, "quarantined": 0, "duplicate": 0}
     man = json.loads(s3.get_object(Bucket=BUCKET, Key=schema.s3_key_manifest(BATCH))["Body"].read())
     assert man["manifest_hash"] == ev["check"]["manifest_hash"]
     assert check_fn.check(s3, BUCKET, BATCH, "normal")["status"] == "ALREADY_PROCESSED"
@@ -287,11 +319,11 @@ def test_verify_mismatch_raises(s3):
     put(s3, "12-1-4", (FIXTURES / "good.csv").read_bytes())
     ev = validated(s3)
     transform_fn.transform(s3, BUCKET, ev, DEVICES)
-    s3.put_object(Bucket=BUCKET, Key=schema.s3_key_processed("readings_1s", BATCH),
+    s3.put_object(Bucket=BUCKET, Key=schema.s3_key_table("readings_1s", BATCH),
                   Body=transform_fn.to_parquet("readings_1s", []))
     with pytest.raises(verify_fn.VerifyMismatch):
         verify_fn.verify(s3, BUCKET, ev, now=NOW)
-    assert "Contents" not in s3.list_objects_v2(Bucket=BUCKET, Prefix="processed/_manifests/")
+    assert "Contents" not in s3.list_objects_v2(Bucket=BUCKET, Prefix=schema.MANIFEST_PREFIX)
 
 
 def test_count_data_lines_matches_parser():

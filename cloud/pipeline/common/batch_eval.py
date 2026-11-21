@@ -8,7 +8,8 @@ Every raw data line ends in exactly one bucket:
   kept       -> readings_1s
   duplicate  -> same (Device_ID, Session, Record_ID) seen earlier in the batch
   invalid    -> any other DROP flag (PARSE_ERROR, NO_RTC, OUT_OF_BATCH_HOUR, ...)
-so  raw_rows == kept + duplicate + invalid  (what VerifyBatch checks).
+so  raw_rows == kept + duplicate + invalid  (what VerifyBatch checks). TransformBatch
+writes the invalid and duplicate rows to quarantine/rows|duplicate/iot/ (rows_csv).
 """
 
 from __future__ import annotations
@@ -199,6 +200,25 @@ def evaluate(batch_id: str, files: list[RawFile], devices) -> BatchEval:
     if ev.raw_rows == 0 and not ev.fail_reasons:
         ev.fail_reasons.append("EMPTY_BATCH files have a header but no rows")
     return ev
+
+
+def rows_csv(ev: BatchEval, bucket: str) -> bytes | None:
+    """Rows of one bucket ("invalid" | "duplicate") as CSV for quarantine/, or None.
+
+    Columns: source_file, line, reason, then the raw CSV columns exactly as the
+    device wrote them. reason = PARSE_ERROR text or the sorted flags of the row.
+    """
+    rows = [r for r in ev.rows if r.bucket == bucket]
+    if not rows:
+        return None
+    header = next((f.header for f in ev.files if f.header), [])
+    out = io.StringIO()
+    w = csv.writer(out, lineterminator="\n")
+    w.writerow(["source_file", "line", "reason", *header])
+    for r in rows:
+        reason = r.error or ",".join(sorted(r.flags))
+        w.writerow([r.key, r.line, reason, *[r.raw.get(c, "") for c in header]])
+    return out.getvalue().encode("utf-8")
 
 
 def _flag_time_jumps(rows: list[EvalRow]) -> None:
