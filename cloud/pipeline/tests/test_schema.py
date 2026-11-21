@@ -190,15 +190,21 @@ def test_s3_keys():
     assert s.s3_key_raw("IOTW-A001", None, None, "12-1-300") == (
         "raw/csv/device_id=IOTW-A001/date=unknown/hour=unknown/part-12-1-300.csv")
     b = "IOTW-A001__2026-11-16__08"
-    assert s.s3_key_processed("readings_1min", b) == (
-        "processed/readings_1min/device_id=IOTW-A001/date=2026-11-16/IOTW-A001__2026-11-16__08.parquet")
-    assert s.s3_key_report(b) == f"validation/{b}/report.json"
-    assert s.s3_prefix_quarantine(b) == f"quarantine/{b}/"
-    assert s.s3_key_manifest(b) == f"processed/_manifests/{b}.json"
+    assert s.s3_key_table("readings_1s", b) == (
+        "trusted/iot_readings_1s/device_id=IOTW-A001/date=2026-11-16/IOTW-A001__2026-11-16__08.parquet")
+    assert s.s3_key_table("readings_1min", b) == (
+        "curated/readings_1min/device_id=IOTW-A001/date=2026-11-16/IOTW-A001__2026-11-16__08.parquet")
+    assert s.s3_key_table("quality", b).startswith("trusted/iot_quality/device_id=IOTW-A001/")
+    assert s.s3_key_report(b) == f"validation/iot/{b}/report.json"
+    assert s.s3_prefix_quarantine(b) == f"quarantine/batch/iot/{b}/"
+    assert s.s3_key_quarantine_rows(b) == f"quarantine/rows/iot/{b}/rows.csv"
+    assert s.s3_key_quarantine_duplicate(b) == f"quarantine/duplicate/iot/{b}/rows.csv"
+    assert s.s3_key_manifest(b) == f"curated/_success/iot/{b}.json"
+    assert s.MANIFEST_PREFIX == "curated/_success/iot/"
     with pytest.raises(ValueError):
         s.s3_key_raw("IOTW-A001", "2026-11-16", 8, "bad")
     with pytest.raises(ValueError):
-        s.s3_key_processed("nope", b)
+        s.s3_key_table("nope", b)
 
 
 def test_raw_partition_from_raw_dict():

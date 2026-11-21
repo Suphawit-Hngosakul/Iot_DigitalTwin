@@ -74,15 +74,21 @@ variable "api_allowed_origins" {
 }
 
 variable "satellite_enabled" {
-  description = "Deploy the GEE layer + test Lambda (#25) + satellite_ingest with its daily schedule (#27). Build the layer first: python cloud/satellite/layer/build_layer.py"
+  description = "Deploy the GEE layer + test Lambda (#25) + satellite_ingest with its daily schedule (#27). The layer zip is built on apply (see python_cmd / gee_layer_zip)."
   type        = bool
   default     = false
 }
 
 variable "gee_layer_zip" {
-  description = "Path to gee-layer.zip. Empty = cloud/satellite/layer/build/gee-layer.zip (output of build_layer.py)."
+  description = "Path to a prebuilt gee-layer.zip. Empty = Terraform runs cloud/satellite/layer/build_layer.py on apply."
   type        = string
   default     = ""
+}
+
+variable "python_cmd" {
+  description = "Python with pip used to build gee-layer.zip on apply (python on Windows, python3 on most Linux/macOS)"
+  type        = string
+  default     = "python"
 }
 
 variable "gee_project" {

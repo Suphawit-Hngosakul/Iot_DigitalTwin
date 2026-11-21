@@ -6,7 +6,7 @@ Lambda `iot-dt-api` (Python 3.12, `LabRole`, stdlib + boto3 ไม่ใช้ l
 
 | Method | Path | Query | อ่านจาก |
 |---|---|---|---|
-| GET | `/devices` | — | `devices.csv` + publish marker `processed/_manifests/<batch_id>.json` (ไม่ใช้ Athena) |
+| GET | `/devices` | — | `devices.csv` + publish marker `curated/_success/iot/<batch_id>.json` (ไม่ใช้ Athena) |
 | GET | `/latest` | `device` | `readings_1min` เฉพาะวันที่ของชั่วโมงล่าสุดที่ publish |
 | GET | `/readings` | `device`, `from`, `to`, `interval=1s\|1min` (default 1min) | `readings_1s` (≤ 6 ชม.) / `readings_1min` (≤ 31 วัน) |
 | GET | `/quality` | `device`, `from`, `to` (≤ 31 วัน) | `quality` รวมทุก session ต่อชั่วโมง |

@@ -23,7 +23,7 @@ Rules (spec 40 §3):
 - CORS is done by API Gateway (cors_configuration, ALLOWED_ORIGINS).
 
 The latest published hour comes from the publish markers
-processed/_manifests/<batch_id>.json that VerifyBatch writes (spec 30 §4):
+curated/_success/iot/<batch_id>.json that VerifyBatch writes (spec 30 §4):
 cheaper and faster than Athena, and /latest uses its date as the partition.
 
 Only stdlib + boto3 (in the Lambda runtime): no layer.
@@ -59,7 +59,7 @@ INTERVALS = {
     "1min": ("readings_1min", "minute_local", timedelta(days=31)),
 }
 QUALITY_MAX_RANGE = timedelta(days=31)
-MANIFEST_PREFIX = "processed/_manifests/"
+MANIFEST_PREFIX = "curated/_success/iot/"
 SATELLITE_SUCCESS_PREFIX = "curated/_success/satellite/"
 PIXEL_LAYERS = ("lst", "ndvi", "ndbi")
 STATIC_LAYERS = ("building_density",)

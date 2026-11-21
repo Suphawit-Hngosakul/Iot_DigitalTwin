@@ -26,6 +26,18 @@ variable "layer_zip" {
   type        = string
 }
 
+variable "layer_build_script" {
+  description = "build_layer.py. Set = Terraform builds layer_zip itself on apply (rebuilds when requirements.txt changes). Empty = layer_zip is prebuilt."
+  type        = string
+  default     = ""
+}
+
+variable "python_cmd" {
+  description = "Python with pip that runs layer_build_script (python on Windows, python3 on most Linux/macOS)"
+  type        = string
+  default     = "python"
+}
+
 variable "gee_project" {
   type = string
 }
@@ -88,14 +100,37 @@ locals {
   })
 }
 
-# earthengine-api + google-auth, shared later with satellite_ingest (#27).
+locals {
+  build_layer        = var.layer_build_script != ""
+  layer_requirements = "${dirname(var.layer_build_script)}/requirements.txt"
+  # Auto-build: hash the inputs (known at plan time, zip may not exist yet).
+  # Prebuilt: hash the zip itself.
+  layer_hash = local.build_layer ? base64sha256(join("", [
+    filesha256(local.layer_requirements), filesha256(var.layer_build_script),
+  ])) : filebase64sha256(var.layer_zip)
+}
+
+# pip-downloads manylinux wheels into layer_zip. Runs on first apply and
+# whenever requirements.txt or build_layer.py changes, not on every apply.
+resource "terraform_data" "build_layer" {
+  count            = local.build_layer ? 1 : 0
+  triggers_replace = [local.layer_hash]
+
+  provisioner "local-exec" {
+    command = "${var.python_cmd} \"${var.layer_build_script}\""
+  }
+}
+
+# earthengine-api + google-auth, shared with satellite_ingest (#27).
 resource "aws_lambda_layer_version" "gee" {
   layer_name               = "${var.name_prefix}-gee"
   filename                 = var.layer_zip
-  source_code_hash         = filebase64sha256(var.layer_zip)
+  source_code_hash         = local.layer_hash
   compatible_runtimes      = ["python3.12"]
   compatible_architectures = ["x86_64"]
   description              = "earthengine-api + google-auth (cloud/satellite/layer/requirements.txt)"
+
+  depends_on = [terraform_data.build_layer]
 }
 
 data "archive_file" "satellite" {

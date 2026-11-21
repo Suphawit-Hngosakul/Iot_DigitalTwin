@@ -275,7 +275,7 @@ def clean_row(row: dict, flags: Iterable[str]) -> dict:
 
 
 # =============================================================================
-#  Parquet tables (processed)
+#  Parquet tables (trusted / curated)
 # =============================================================================
 # Type names are Glue/Athena types. Partition keys are NOT stored in the
 # files (Athena rejects a column that repeats a partition key).
@@ -338,7 +338,7 @@ TABLES = {
 
 
 def arrow_schema(table: str):
-    """pyarrow.Schema for a processed table (pyarrow imported lazily)."""
+    """pyarrow.Schema for an IoT table (pyarrow imported lazily)."""
     import pyarrow as pa
 
     types = {
@@ -446,27 +446,58 @@ def raw_prefix(batch_id: str) -> str:
             f"hour={b.hour:02d}/")
 
 
-def s3_key_processed(table: str, batch_id: str) -> str:
-    if table not in TABLES:
+# Zone of every Parquet table (spec 01 §2 / spec 30 §8, D23): readings_1s and quality
+# are the validated copy of the raw rows (trusted); readings_1min is derived and
+# ready to use (curated).
+TABLE_ZONE = {
+    "readings_1s": "trusted/iot_readings_1s",
+    "readings_1min": "curated/readings_1min",
+    "quality": "trusted/iot_quality",
+}
+assert set(TABLE_ZONE) == set(TABLES)
+
+# Publish marker written by VerifyBatch (CheckBatch, the API and curated-merge read it).
+MANIFEST_PREFIX = "curated/_success/iot/"
+
+
+def table_prefix(table: str) -> str:
+    """S3 prefix of a table, no trailing slash (Glue locations use this)."""
+    if table not in TABLE_ZONE:
         raise ValueError(f"unknown table: {table!r}")
+    return TABLE_ZONE[table]
+
+
+def s3_key_table(table: str, batch_id: str) -> str:
     b = parse_batch_id(batch_id)
-    return (f"processed/{table}/device_id={b.device_id}/"
+    return (f"{table_prefix(table)}/device_id={b.device_id}/"
             f"date={b.date.isoformat()}/{batch_id}.parquet")
 
 
 def s3_key_report(batch_id: str) -> str:
     parse_batch_id(batch_id)
-    return f"validation/{batch_id}/report.json"
+    return f"validation/iot/{batch_id}/report.json"
 
 
 def s3_prefix_quarantine(batch_id: str) -> str:
+    """Whole batch failed validation: raw copies + reason.json."""
     parse_batch_id(batch_id)
-    return f"quarantine/{batch_id}/"
+    return f"quarantine/batch/iot/{batch_id}/"
+
+
+def s3_key_quarantine_rows(batch_id: str) -> str:
+    """Rows rejected inside a batch that passed (INVALID)."""
+    parse_batch_id(batch_id)
+    return f"quarantine/rows/iot/{batch_id}/rows.csv"
+
+
+def s3_key_quarantine_duplicate(batch_id: str) -> str:
+    parse_batch_id(batch_id)
+    return f"quarantine/duplicate/iot/{batch_id}/rows.csv"
 
 
 def s3_key_manifest(batch_id: str) -> str:
     parse_batch_id(batch_id)
-    return f"processed/_manifests/{batch_id}.json"
+    return f"{MANIFEST_PREFIX}{batch_id}.json"
 
 
 # =============================================================================

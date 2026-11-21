@@ -98,8 +98,15 @@ locals {
     ["flags", "string"],
   ]
 
+  # S3 prefix per IoT table; must match schema.TABLE_ZONE (D23 step 4).
+  iot_prefix = {
+    readings_1s   = "trusted/iot_readings_1s"
+    readings_1min = "curated/readings_1min"
+    quality       = "trusted/iot_quality"
+  }
+
   # Must match schema.TABLES in cloud/pipeline/common/schema.py.
-  processed_tables = {
+  iot_tables = {
     readings_1s = [
       ["device_type", "string"],
       ["session", "bigint"],
@@ -250,20 +257,28 @@ resource "aws_glue_catalog_table" "raw_csv_unknown" {
   }
 }
 
-# --- processed Parquet (spec 01 §4) ----------------------------------------
-resource "aws_glue_catalog_table" "processed" {
-  for_each = local.processed_tables
+# --- IoT Parquet: trusted/ + curated/ (spec 01 §4, D23) ---------------------
+# Renamed from aws_glue_catalog_table.processed (D23 step 4): without this block
+# Terraform would delete the 3 tables and create them again in parallel, and the
+# create fails with AlreadyExistsException. With it the tables are updated in place.
+moved {
+  from = aws_glue_catalog_table.processed
+  to   = aws_glue_catalog_table.iot
+}
+
+resource "aws_glue_catalog_table" "iot" {
+  for_each = local.iot_tables
 
   database_name = aws_glue_catalog_database.this.name
   name          = each.key
-  description   = "Pipeline output processed/${each.key}/ (spec 01 §4)"
+  description   = "Pipeline output ${local.iot_prefix[each.key]}/ (spec 01 §4, D23)"
   table_type    = "EXTERNAL_TABLE"
 
   parameters = merge(local.projection_device, local.projection_date, {
     "classification"            = "parquet"
     "parquet.compression"       = "SNAPPY"
     "projection.enabled"        = "true"
-    "storage.location.template" = "${local.bucket_uri}/processed/${each.key}/device_id=$${device_id}/date=$${date}/"
+    "storage.location.template" = "${local.bucket_uri}/${local.iot_prefix[each.key]}/device_id=$${device_id}/date=$${date}/"
   })
 
   partition_keys {
@@ -276,7 +291,7 @@ resource "aws_glue_catalog_table" "processed" {
   }
 
   storage_descriptor {
-    location      = "${local.bucket_uri}/processed/${each.key}/"
+    location      = "${local.bucket_uri}/${local.iot_prefix[each.key]}/"
     input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
     output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
 
@@ -457,7 +472,7 @@ locals {
     "readings-1min-one-day"    = "1 device x 1 day of readings_1min (done-check of #17: <= 5 s)"
     "readings-1s-one-hour"     = "1 device x 1 hour of readings_1s"
     "quality-per-day"          = "Loss rate per device per day"
-    "raw-rows-per-hour"        = "Raw CSV rows per hour vs processed rows (pipeline check)"
+    "raw-rows-per-hour"        = "Raw CSV rows per hour vs trusted rows (pipeline check)"
     "raw-unknown-time-count"   = "Rows without a trusted time per device / session (RTC problems)"
     "satellite-grid-per-batch" = "satellite_grid cells / LST per scene or season (done-check of #31)"
     "cell-period-coverage"     = "cell_period rows and column coverage per period / match set (done-check of #32)"

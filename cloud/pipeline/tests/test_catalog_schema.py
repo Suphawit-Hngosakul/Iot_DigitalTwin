@@ -33,10 +33,19 @@ def _columns(text: str, start: str) -> list[tuple[str, str]]:
     return _COL.findall(_block(text, start))
 
 
-def test_processed_tables_match_schema():
+def test_iot_tables_match_schema():
     text = CATALOG_TF.read_text(encoding="utf-8")
     for table, cols in schema.TABLES.items():
         assert _columns(text, f"{table} = [") == list(cols), table
+
+
+def test_iot_table_locations_match_writer():
+    """iot_prefix in Terraform must be the folder TransformBatch writes (schema.TABLE_ZONE)."""
+    text = CATALOG_TF.read_text(encoding="utf-8")
+    block = text[text.index("iot_prefix = {"):]
+    block = block[:block.index("}")]
+    found = dict(re.findall(r'(\w+)\s*=\s*"([^"]+)"', block))
+    assert found == schema.TABLE_ZONE
 
 
 def test_raw_columns_follow_csv_order():

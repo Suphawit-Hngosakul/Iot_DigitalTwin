@@ -149,7 +149,7 @@ def key_merge_marker(period: str) -> str:
 SUCCESS_SATELLITE_PREFIX = "curated/_success/satellite/"
 SUCCESS_BUILDINGS_KEY = ss.s3_key_success(ss.STATIC_BUILDINGS)
 MERGE_MARKER_PREFIX = "curated/_success/merge/"
-IOT_MANIFEST_PREFIX = "processed/_manifests/"   # moves with IoT in D23 step 4
+IOT_MANIFEST_PREFIX = "curated/_success/iot/"   # = schema.MANIFEST_PREFIX (D23 step 4)
 
 
 def year_from_trusted_key(key: str) -> int:

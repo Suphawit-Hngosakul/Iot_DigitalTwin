@@ -29,7 +29,7 @@ Device_ID,Device_Type,Session,Record_ID,DateTime,dBA,dB_SPL,Lux,Temp_C,Humidity_
 
 แถวที่ไม่ถูกตัด ค่าที่มี flag จะถูกตั้งเป็น null (`clean_row`) เช่น `DHT_ERR` → temp/humidity null, `GPS_MISSING`/`GPS_POOR` → lat/lon/alt/speed null
 
-## 3. Parquet (processed)
+## 3. Parquet (trusted / curated)
 
 Partition: `device_id`, `date` (อยู่ใน path ไม่อยู่ในไฟล์) ไม่มีคอลัมน์ `*_Valid` / `Flags` เพราะ clean แล้ว
 ย้อนดูสาเหตุรายแถวได้จาก raw ด้วย `session` + `record_id` และดูจำนวนต่อ batch ได้ที่ `quality.flag_counts`
@@ -49,10 +49,12 @@ batch = 1 เครื่อง × 1 ชั่วโมงเวลาไทย,
 | | key |
 |---|---|
 | raw | `raw/csv/device_id=<id>/date=<YYYY-MM-DD>/hour=<HH>/part-<chunk_id>.csv` (ไม่มีเวลา: `date=unknown/hour=unknown`) |
-| processed | `processed/<table>/device_id=<id>/date=<YYYY-MM-DD>/<batch_id>.parquet` |
+| readings_1s | `trusted/iot_readings_1s/device_id=<id>/date=<YYYY-MM-DD>/<batch_id>.parquet` |
+| quality | `trusted/iot_quality/device_id=<id>/date=<YYYY-MM-DD>/<batch_id>.parquet` |
+| readings_1min | `curated/readings_1min/device_id=<id>/date=<YYYY-MM-DD>/<batch_id>.parquet` |
 | report | `validation/<batch_id>/report.json` |
 | กักกัน | `quarantine/<batch_id>/` |
-| manifest | `processed/_manifests/<batch_id>.json` |
+| manifest | `curated/_success/iot/<batch_id>.json` |
 
 `chunk_id` = `<session>-<first_record>-<last_record>`
 

@@ -41,7 +41,7 @@ def manifest_hash(files: list[dict]) -> str:
 
 
 def read_published(s3, bucket: str, batch_id: str) -> dict | None:
-    """processed/_manifests/<batch_id>.json, or None if never published."""
+    """curated/_success/iot/<batch_id>.json, or None if never published."""
     try:
         obj = s3.get_object(Bucket=bucket, Key=schema.s3_key_manifest(batch_id))
     except s3.exceptions.NoSuchKey:
