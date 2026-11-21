@@ -1,53 +1,57 @@
-# คัดลอกเป็น terraform.tfvars แล้วใส่ค่าจริง (ห้าม commit terraform.tfvars)
-bucket_name = "digitaltwin-lake-<account-id>"   # data lake เดียวของ IoT + ดาวเทียม (แยกด้วย prefix)
+// ============================================================================
+// terraform.tfvars.example  ->  คัดลอกเป็น terraform.tfvars แล้วแก้ค่า (ห้าม commit terraform.tfvars)
+//
+// อ่านจากบนลงล่าง (3 ส่วน):
+//   1) ต้องแก้      ค่าที่ไม่มี default ต้องใส่ก่อนถึงจะ apply ได้
+//   2) เปิดอยู่แล้ว  ส่วนของ IoT ใช้ค่าตามนี้ได้เลย แก้เมื่อจำเป็น
+//   3) ปิดอยู่       ส่วนของดาวเทียม เปิดทีละขั้นตามลำดับ A -> B -> C
+// ============================================================================
 
-# ได้จาก: python cloud/ingest/make_token.py <device_id>  (ใส่แค่ hash)
+
+// ── 1) ต้องแก้ ───────────────────────────────────────────────────────────────
+
+// ชื่อ S3 bucket ของ data lake (IoT + ดาวเทียมใช้ bucket เดียว แยกด้วย prefix)
+// ต้องไม่ซ้ำทั่วโลก ใช้ account id ต่อท้าย Terraform สร้าง bucket ให้เอง
+bucket_name = "digitaltwin-lake-<account-id>"
+
+// token ของบอร์ด เก็บเฉพาะ hash: python cloud/ingest/make_token.py <device_id>
 device_token_hashes = {
   "<sha256-of-token-walk-01>" = "IOTW-A001"
   "<sha256-of-token-walk-02>" = "IOTW-A002"
 }
 
-# EC2 relay ให้บอร์ดส่ง HTTP (บอร์ดไม่มี RAM ทำ TLS) ปิด = false
-relay_enabled = true
-# realtime hub (ws:// :8081) บน EC2 ตัวเดียวกัน ใช้ device_token_hashes ชุดเดียวกับ ingest (D22)
-hub_enabled = true
-# เปิด port 22 ให้ EC2 Instance Connect ดู log ได้ (ว่าง = ปิด)
-# relay_ssh_cidrs = ["18.206.107.24/29"]
+// อีเมลรับแจ้งเตือนจาก pipeline (ต้องกดยืนยันในอีเมลที่ SNS ส่งมาครั้งแรก)
+alert_email = "you@example.com"
 
-# IoT pipeline (#11-#16)
-alert_email               = "you@example.com"   # กดยืนยันในอีเมลที่ SNS ส่งมาครั้งแรก
-pipeline_schedule_enabled = true                # false = รันมืออย่างเดียว
-# layer สำเร็จรูปของ AWS (มี pyarrow) เลขเวอร์ชันล่าสุดดูที่
-# https://aws-sdk-pandas.readthedocs.io/en/stable/install.html หัวข้อ AWS Lambda Layer
+// layer สำเร็จรูปของ AWS (มี pyarrow) ใส่เลขเวอร์ชันล่าสุดแทน <version>
+// ดูที่ https://aws-sdk-pandas.readthedocs.io/en/stable/install.html หัวข้อ AWS Lambda Layer
 pandas_layer_arn = "arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:<version>"
 
-# Glue + Athena (#17) ไม่ต้องใส่ก็ได้ ใช้ค่า default
-# catalog_date_start          = "2026-11-01"   # วันแรกที่ตารางมองเห็น (เวลาไทย) ยิ่งเก่า query ที่ไม่กรอง date ยิ่งช้า
-# athena_bytes_scanned_cutoff = 1073741824     # query สแกนเกิน 1 GiB ถูกยกเลิก
 
-# API ให้เว็บ (#18) ไม่ใส่ = เปิด CORS ทุกโดเมน ("*") ใส่โดเมนเว็บจริงเมื่อ #35 ขึ้นแล้ว
-# api_allowed_origins = ["http://<web-bucket>.s3-website-us-east-1.amazonaws.com"]
+// ── 2) IoT: เปิดอยู่แล้ว ──────────────────────────────────────────────────────
 
-# GEE layer + test Lambda (#25) + satellite_ingest (#27) ปิดไว้ก่อน
-# เปิดแล้ว apply จะรัน cloud/satellite/layer/build_layer.py สร้าง gee-layer.zip ให้เอง (ต้องมี python + pip)
+// EC2 relay ให้บอร์ดส่ง HTTP (บอร์ดไม่มี RAM ทำ TLS) และ realtime hub (ws:// :8081, D22)
+// ทั้งสองอยู่บน EC2 ตัวเดียวกัน ใช้ device_token_hashes ชุดเดียวกับ ingest ปิด = false
+relay_enabled = true
+hub_enabled   = true
+
+// pipeline ตั้งเวลารันเอง false = รันมืออย่างเดียว
+pipeline_schedule_enabled = true
+
+
+// ── 3) ดาวเทียม: ปิดอยู่ เปิดทีละขั้น (เปลี่ยนเป็น true แล้ว apply ทีละอัน) ────────
+
+// A. ดึง Landsat จาก GEE ลง S3 raw/satellite/ ทุกวัน
+//    เปิดแล้ว apply จะรัน cloud/satellite/layer/build_layer.py สร้าง gee-layer.zip ให้เอง
+//    (เครื่องที่รัน terraform ต้องมี python + pip และออกเน็ตได้)
 satellite_enabled = false
-# python_cmd    = "python3"                     # ค่าเริ่มต้น "python"
-# gee_layer_zip = "C:/path/to/gee-layer.zip"   # ตั้งเมื่อมี zip สำเร็จรูป = ไม่ build เอง
-# gee_project   = "turnkey-tribute-511903-t6"
-# gee_assets    = "projects/turnkey-tribute-511903-t6/assets/laksi_boundary"
-# ค่า WIF (gee_wif) ใช้ default ใน variables.tf ถ้าเปลี่ยน project (spec 50 ทาง ข) ค่อย override
-# satellite_ingest (#27) มากับ satellite_enabled
-# satellite_ingest_schedule = "cron(0 2 * * ? *)"   # "" = รันมือเท่านั้น
-# satellite_max_cloud_pct   = 40
-# satellite_min_valid_ratio = 0.15
 
-# satellite pipeline (#30-#31, spec 51): raw/satellite/<batch>/_COMPLETE -> contract -> trusted/ + layers
-# เปิดแล้ว bucket จะส่ง event ให้ EventBridge (aws_s3_bucket_notification ทับ notification อื่นของ bucket)
+// B. ตรวจ batch ด้วย data contract -> trusted/ + PNG layer (ต้องเปิด A ก่อน)
+//    หมายเหตุ: เปิดแล้ว bucket จะส่ง event ให้ EventBridge (ทับ notification อื่นของ bucket)
 satellite_pipeline_enabled = false
-# satellite_pipeline_trigger_enabled = true   # false = รันมือ (aws stepfunctions start-execution) เท่านั้น
 
-# curated-merge (#32, spec 60 §2.1): Athena MERGE -> Iceberg iot_walking.cell_period
-# ต้องเปิด satellite_pipeline_enabled ด้วย (S3 -> EventBridge) และ apply catalog ก่อน (ตาราง buildings_grid)
+// C. Athena MERGE -> ตาราง Iceberg iot_walking.cell_period (ต้องเปิด B ก่อน และ apply catalog ให้เสร็จก่อน)
 curated_merge_enabled = false
-# curated_merge_trigger_enabled = true      # false = รันมือเท่านั้น
-# curated_merge_daily_schedule  = "cron(0 10 * * ? *)"   # "" = ไม่รันรายวัน
+
+
+// ตัวเลือกอื่นทั้งหมด (CORS, ตั้งเวลา, ค่า GEE, threshold ฯลฯ) มี default ใน variables.tf ไม่ต้องใส่
