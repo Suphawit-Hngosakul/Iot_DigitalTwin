@@ -20,14 +20,167 @@ IaC ของทุกอย่างใน `cloud/` ด้วย **Terraform/Op
 | `satellite_pipeline` | 32, 51 | #30, #31 | Lambda 6 ตัว `iot-dt-sat-*` + Step Functions `iot-dt-sat-pipeline` + EventBridge rule `iot-dt-sat-complete` (S3 Object Created `raw/satellite/*/_COMPLETE`, ปิดด้วย `satellite_pipeline_trigger_enabled = false`) + data contracts (`cloud/pipeline/contracts/*.yaml` แปลงเป็น JSON ตอน zip) แจ้งเตือนผ่าน SNS ของ `pipeline` ปิดไว้เป็นค่าเริ่มต้น เปิดด้วย `satellite_pipeline_enabled = true` (เปิด S3 → EventBridge ของ bucket ด้วย) |
 | `curated_merge` | 60 §2.1 | #32 | Lambda 4 ตัว `iot-dt-curated-*` + Step Functions `iot-dt-curated-merge` (PlanMerge → CheckSources → MergeCurated → VerifyCurated, `WaitingForOtherSources` เมื่อแหล่งไม่ครบ) + EventBridge rule `iot-dt-curated-published` (S3 `curated/_success/satellite|buildings/*.json`) + Scheduler รายวัน 10:00 น. เวลาไทย (`curated_merge_daily_schedule`, `""` = ไม่รัน) สร้างตาราง Iceberg `iot_walking.cell_period` ที่ `curated/cell_period/` (`cloud/analytics/curated_merge/`) ปิดไว้เป็นค่าเริ่มต้น เปิดด้วย `curated_merge_enabled = true` (ต้องเปิด `satellite_pipeline_enabled` ด้วย) |
 
+## Deploy ตั้งแต่เริ่มต้น (บัญชี AWS ใหม่ที่ไม่มีอะไรเลย)
+
+ลำดับนี้ใช้ได้ทั้งบัญชีใหม่และ deploy ซ้ำ ทำทีละขั้นตามลำดับ **ขั้น 1-5 คือ IoT** (ใช้งานได้เลย) **ขั้น 6-8 คือดาวเทียม** (เปิดทีละชั้นเมื่อพร้อม)
+
+> หมายเหตุ: ขั้นที่ไม่ต้องรอบริการภายนอก (1-5) ผ่าน `terraform fmt` แล้ว แต่ลำดับทั้งชุดยังไม่เคยรันครบในบัญชีใหม่ ถ้าติดตรงไหนดู "แก้ปัญหาที่เจอบ่อย" ท้ายหัวข้อนี้
+
+### ขั้น 0: เตรียมเครื่อง
+
+| ต้องมี | ใช้ทำอะไร | เช็ก |
+|---|---|---|
+| Terraform >= 1.6 (หรือ OpenTofu) | สร้างทุก resource | `terraform version` |
+| AWS CLI v2 | Terraform เรียกสร้าง bucket + ใช้ตรวจผล | `aws --version` |
+| bash | `local-exec` ของ module `storage` (Windows ใช้ Git Bash) | `bash --version` |
+| Python 3.12 + pip | สร้างโทเค็นอุปกรณ์ + build GEE layer (เฉพาะถ้าเปิดดาวเทียม) | `python --version` |
+| git | clone repo | `git --version` |
+
+เครื่องที่ไม่มีของข้างบน ใช้ **AWS CloudShell** แทนได้ (มี aws, bash, python, git อยู่แล้ว ต้องติดตั้ง Terraform เอง และไม่ต้องตั้ง credentials)
+
+**CloudShell: home มีพื้นที่แค่ 1 GB** provider AWS ใน `.terraform/` ใช้หลายร้อย MB รวมกับ GEE layer แล้วเต็ม ทำให้ apply สร้าง resource ได้แต่ **บันทึก state ไม่ได้** ให้เก็บ provider ไว้ที่ `/tmp` ทุกครั้งที่เปิด CloudShell ก่อน `terraform init`:
 ```bash
-cp terraform.tfvars.example terraform.tfvars   # ใส่ค่าจริง
+export TF_DATA_DIR=/tmp/tf-data     # /tmp หายเมื่อปิด session -> init ใหม่ได้ ส่วน terraform.tfstate ยังอยู่ใน home
 terraform init
-terraform plan
+```
+
+### ขั้น 1: ตั้ง credentials ของ AWS
+
+1. Learner Lab: กด **Start Lab** แล้วเปิด **AWS Details** → **AWS CLI: Show**
+2. วางทั้งก้อน (`aws_access_key_id`, `aws_secret_access_key`, `aws_session_token`) ลง `~/.aws/credentials` (Windows: `C:\Users\<ชื่อ>\.aws\credentials`)
+3. ตั้ง region เป็น `us-east-1` (ตัวแปร `region` default ตรงกันแล้ว)
+4. เช็ก: `aws sts get-caller-identity` ต้องเห็น account id ของบัญชีใหม่
+
+credentials ของ Learner Lab หมดอายุทุก session (เจอ `ExpiredToken` / `InvalidClientTokenId` ให้ทำขั้นนี้ใหม่) ทำงานในบัญชีนี้ได้อย่างเดียว ไม่สร้าง IAM role เองได้ ทุก service ใช้ `LabRole` ที่มีอยู่
+
+### ขั้น 2: เอาโค้ดมา
+
+```bash
+git clone https://github.com/suphawit-hngosakul/iot_digitaltwin.git
+cd iot_digitaltwin
+git checkout develop            # branch หลัก
+cd cloud/infra
+```
+
+### ขั้น 3: สร้างโทเค็นอุปกรณ์ + ค่าที่ต้องใส่
+
+1. สร้างโทเค็นต่ออุปกรณ์ 1 ครั้ง (รันที่ root ของ repo):
+   ```bash
+   python cloud/ingest/make_token.py IOTW-A001
+   python cloud/ingest/make_token.py IOTW-A002
+   ```
+   ได้ 3 บรรทัดต่อเครื่อง: `token` เก็บไว้ใน `secrets.h` ของบอร์ด (ห้าม commit, ห้ามใส่ใน tfvars) ส่วนบรรทัด `tfvars` คือ hash ที่จะคัดลอกไปใส่ในขั้นถัดไป
+2. หาเลข version ล่าสุดของ layer `AWSSDKPandas-Python312` ใน us-east-1 ที่ https://aws-sdk-pandas.readthedocs.io/en/stable/layers.html
+3. คัดลอกไฟล์ตัวอย่างแล้วแก้ 4 ค่าในส่วน "ต้องแก้":
+   ```bash
+   cp terraform.tfvars.example terraform.tfvars    # ห้าม commit ไฟล์นี้ (gitignore ไว้แล้ว)
+   ```
+   | ตัวแปร | ใส่อะไร |
+   |---|---|
+   | `bucket_name` | `digitaltwin-lake-<account-id>` (ไม่ซ้ำทั่วโลก; `aws sts get-caller-identity` ให้ account id) |
+   | `device_token_hashes` | บรรทัด `tfvars` จากขั้น 3.1 ของทุกอุปกรณ์ |
+   | `alert_email` | อีเมลที่รับแจ้งเตือน pipeline ล้มเหลว |
+   | `pandas_layer_arn` | ARN จากขั้น 3.2 พร้อมเลข version จริง |
+
+   ส่วนอื่นของ tfvars ปล่อยไว้ตามตัวอย่างได้ (IoT เปิดอยู่ ดาวเทียมปิดอยู่)
+
+### ขั้น 4: Deploy ส่วน IoT
+
+```bash
+terraform init          # ดาวน์โหลด provider (ต้องออกเน็ตได้ถึง registry.terraform.io)
+terraform plan          # อ่านผลก่อน อ่านรายการ resource ที่จะสร้างให้ครบ
 terraform apply
 ```
 
-Learner Lab: credentials เปลี่ยนทุก session ต้องอัปเดต `~/.aws/credentials` ก่อนรัน (ใน CloudShell ไม่ต้อง)
+สิ่งที่เกิดขึ้นตอน apply ครั้งแรก:
+- module `storage` สร้าง S3 bucket ด้วย AWS CLI (`terraform_data` + `local-exec`) ถ้ามี bucket ชื่อนี้อยู่แล้วจะข้ามไป
+- ได้ Lambda ingest + HTTP API, Step Functions pipeline + Scheduler ทุกชั่วโมงนาทีที่ 5 (เวลาไทย), Glue database `iot_walking` + Athena workgroup, API ให้เว็บ, และ EC2 relay + Elastic IP + realtime hub
+- EC2 ติดตั้ง relay/hub เองผ่าน user-data ตอนบูตครั้งแรก รอประมาณ 2-3 นาทีหลัง apply จบ service ถึงจะขึ้น (ตั้ง `systemd enable` ไว้ ถ้า Learner Lab หยุดเครื่องแล้วเปิดใหม่ service จะขึ้นเอง และ Elastic IP คงเดิม)
+
+จด URL ที่ต้องใช้ต่อ:
+
+```bash
+terraform output ingest_url        # Lambda ingest (HTTPS)
+terraform output relay_url         # http://<Elastic IP>:8080/ingest  -> ใส่ในบอร์ด
+terraform output hub_device_url    # ws://<Elastic IP>:8081/device
+terraform output hub_live_url      # ws://<Elastic IP>:8081/live
+terraform output api_url           # API ของเว็บ
+```
+
+### ขั้น 5: ยืนยันอีเมล + ตั้งค่าบอร์ด + ตรวจผล
+
+1. **ยืนยันอีเมล SNS:** เปิดอีเมลจาก AWS Notifications แล้วกด *Confirm subscription* ไม่งั้นจะไม่ได้รับแจ้งเตือน
+2. **ตั้งบอร์ด** (บัญชีใหม่ = Elastic IP ใหม่ ต้องแก้และ flash ใหม่): ใส่ `relay_url` กับ `hub_device_url` และ token ของอุปกรณ์นั้นใน `secrets.h` ดูวิธีใน `iot/firmware/README.md`
+3. **ตรวจว่าข้อมูลเข้า:** หลังบอร์ดอัปโหลดไฟล์แล้ว ดูว่ามีไฟล์ใน `s3://<bucket>/raw/csv/` (`aws s3 ls s3://<bucket>/raw/csv/ --recursive | head`) pipeline รันเองทุกชั่วโมง นาทีที่ 5 หรือรันมือตาม `cloud/pipeline/README.md`
+4. **ตรวจ catalog:** ใช้ query ใน "ทดสอบ catalog หลัง apply" ด้านล่าง
+5. **ตรวจ API:** `curl "$(terraform output -raw api_url)/devices"` ต้องได้รายชื่ออุปกรณ์กลับมา
+
+บัญชีใหม่เริ่มจากข้อมูลว่าง IoT จะมีข้อมูลหลังบอร์ดอัปโหลดรอบแรก ถ้าบอร์ดเก็บข้อมูลค้างใน SD จะ backfill ให้เองตอนส่ง
+
+### ขั้น 6: ดาวเทียม A (ดึง Landsat จาก GEE)
+
+**ทำก่อน (นอก AWS):** ฝั่ง Google ต้องให้ AWS account ใหม่เข้ามาได้ เพราะ Lambda ยืนยันตัวกับ GEE ด้วย WIF ของ project ที่เป็นของ Get ต้องขอให้เจ้าของ project:
+- เพิ่ม AWS account id ใหม่ให้ AWS provider ของ identity pool (`gee_wif.pool_id` / `provider_id`)
+- ให้สิทธิ์ `roles/iam.workloadIdentityUser` กับ principal ของ `LabRole` ของบัญชีใหม่ บน service account `gee_wif.service_account`
+
+ถ้ายังไม่ทำ Lambda จะได้ error ตอนแลก token ไม่ใช่ปัญหาของ Terraform รายละเอียดดู `cloud/satellite/README.md`
+
+**แล้ว deploy:** แก้ `terraform.tfvars` เป็น `satellite_enabled = true` (ถ้าเครื่องมีแค่ `python3` เพิ่ม `python_cmd = "python3"` ด้วย) แล้ว:
+
+```bash
+terraform apply
+```
+
+Terraform รัน `cloud/satellite/layer/build_layer.py` สร้าง `gee-layer.zip` ให้เองครั้งแรก (ต้องมี Python + pip + เน็ต) จากนั้นทดสอบ:
+
+```bash
+aws lambda invoke --function-name iot-dt-satellite-test --payload '{}' out.json && cat out.json
+# ได้ผลจาก GEE = WIF ใช้ได้; ได้ error สิทธิ์ = ยังตั้งฝั่ง Google ไม่ครบ
+```
+
+`satellite_ingest` ตั้งเวลารันเองทุกวัน 02:00 UTC (เปลี่ยนด้วย `satellite_ingest_schedule`) บัญชีใหม่ไม่มีข้อมูลย้อนหลัง ถ้าต้องการต้องรัน backfill เอง ดูวิธีใน `cloud/satellite/README.md`
+
+### ขั้น 7: ดาวเทียม B (ตรวจ batch → trusted + layer)
+
+แก้ `satellite_pipeline_enabled = true` แล้ว `terraform apply` ข้อควรระวัง: ขั้นนี้เปิด S3 → EventBridge ของ bucket ด้วย `aws_s3_bucket_notification` ซึ่งจะ **ทับ notification อื่นที่ตั้งไว้เองบน bucket นี้** (บัญชีใหม่ไม่มี จึงไม่เป็นปัญหา) pipeline เริ่มเองเมื่อมีไฟล์ `_COMPLETE` ใน `raw/satellite/<batch>/` หรือรันมือด้วย `satellite_pipeline_trigger_enabled = false`
+
+### ขั้น 8: ดาวเทียม C (รวมเป็น `cell_period`)
+
+เปิดได้เมื่อขั้น 7 ทำงานแล้ว (ต้องมี `trusted/satellite_grid/` และตาราง `buildings_grid` จาก catalog):
+
+```bash
+# terraform.tfvars: curated_merge_enabled = true
+terraform apply -target=module.catalog -target=module.curated_merge
+```
+
+หลัง apply รัน `iot-dt-curated-merge` ด้วย `{"mode": "force"}` เพื่อสร้างตาราง Iceberg `iot_walking.cell_period` ครั้งแรก (ดูหัวข้อ "curated_merge" ท้ายไฟล์)
+
+### ถ้าเปิดดาวเทียมแล้วมีปัญหา
+
+เปิด flag ทีละอันตามลำดับ **A → B → C** อย่าเปิดพร้อมกัน เพราะ C ต้องการผลของ B และ B ต้องการข้อมูลของ A ถ้าเปิดแล้วมีปัญหา ตั้งกลับเป็น `false` แล้ว `terraform apply` จะลบ resource ของชั้นนั้น (ข้อมูลใน bucket ไม่ถูกลบ)
+
+### แก้ปัญหาที่เจอบ่อย
+
+| อาการ | สาเหตุ / วิธีแก้ |
+|---|---|
+| `no space left on device` ตอน apply (CloudShell) | home เต็ม: **อย่าปิดหน้าต่างและอย่า apply ซ้ำ** ลบ `~/.cache/pip`, `cloud/satellite/layer/build/`, `.terraform/` แล้วคัดลอก JSON ของ state ที่ Terraform พิมพ์ไว้ในหน้าจอ (ตั้งแต่ `{` แรกถึง `}` สุดท้าย) ลง `errored.tfstate` แล้ว `terraform state push errored.tfstate` จากนั้นตั้ง `TF_DATA_DIR` ตามขั้น 0 แล้ว init + apply ใหม่ ถ้ากู้ state ไม่ได้ ใน Learner Lab กด Reset lab แล้วเริ่มใหม่ |
+| `ExpiredToken` / `InvalidClientTokenId` | credentials ของ Learner Lab หมดอายุ ทำขั้น 1 ใหม่ |
+| apply ล้มตอน `terraform_data.bucket` (`aws: command not found` / `bash`) | เครื่องไม่มี aws หรือ bash ใช้ CloudShell หรือสร้าง bucket เอง `aws s3api create-bucket --bucket <ชื่อ> --region us-east-1` แล้ว apply ซ้ำ (จะข้ามการสร้าง) |
+| `BucketAlreadyExists` | ชื่อ bucket ซ้ำทั่วโลก เปลี่ยน `bucket_name` |
+| `AccessDenied` ที่ `s3:GetBucketObjectLockConfiguration` | เกิดถ้าใช้ resource `aws_s3_bucket` ตรงๆ module `storage` เลี่ยงไว้แล้ว อย่าเปลี่ยนไปใช้ resource นั้น |
+| build layer ล้ม (`python: command not found`, pip ล้มเหลว) | ตั้ง `python_cmd = "python3"` และเช็กว่าออกเน็ตได้ หรือ build เองแล้วตั้ง `gee_layer_zip` |
+| Step Functions / Scheduler รันไม่ขึ้นเพราะสิทธิ์ | เช็ก trust policy ของ `LabRole` ว่ามี `scheduler.amazonaws.com` และ `states.amazonaws.com` |
+| `satellite_test` error ตอนแลก token | ฝั่ง Google ยังไม่เพิ่ม AWS account ใหม่ (ขั้น 6) |
+| `AlreadyExists` ของตาราง Glue | ตารางเดิมที่สร้างนอก Terraform ลบรายการนั้นใน Glue แล้ว apply ใหม่ |
+| ไม่ได้อีเมลแจ้งเตือน | ยังไม่กดยืนยันอีเมล SNS (ขั้น 5.1) |
+
+### ล้างทั้งหมด (ถ้าต้องการ)
+
+`terraform destroy` ลบทุก resource ยกเว้น bucket กับข้อมูลข้างใน (ตั้งใจให้ปลอดภัย) ถ้าต้องการลบ bucket จริงให้ทำเองหลังตรวจแล้ว: `aws s3 rb s3://<bucket> --force` ไฟล์ `terraform.tfstate` อยู่ในเครื่องที่รัน เก็บสำรองไว้ถ้าจะ apply จากเครื่องอื่น หายแล้ว Terraform จะไม่รู้จัก resource ที่สร้างไป
+
+---
+
+## อ้างอิง
 
 **bucket:** module `storage` สร้าง bucket ด้วย AWS CLI ผ่าน `terraform_data` + `local-exec` (ต้องมี `aws` และ `bash` ในเครื่องที่รัน เช่น CloudShell) เพราะ resource `aws_s3_bucket` อ่าน Object Lock ของ bucket ทุกครั้ง แต่ SCP ของ Learner Lab ห้าม `s3:GetBucketObjectLockConfiguration` (403) ถ้ามี bucket อยู่แล้วจะข้ามไป Terraform ตั้งค่าเฉพาะ public access block / ownership / encryption / lifecycle / notification และ `terraform destroy` **ไม่ลบ** bucket กับข้อมูลข้างใน
 
