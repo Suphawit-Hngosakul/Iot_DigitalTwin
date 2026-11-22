@@ -1,0 +1,130 @@
+{
+  "Comment": "Heat analytics pipeline (Spec 60 §3-4, Issue #33): computes S1-S8 statistics from iot_walking.cell_period and writes JSON + Parquet outputs to curated/analytics/.",
+  "StartAt": "PlanAnalytics",
+  "States": {
+    "PlanAnalytics": {
+      "Type": "Task",
+      "Resource": "${plan_analytics_arn}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "AnythingToAnalyze?"
+    },
+    "AnythingToAnalyze?": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.plan.count",
+          "NumericGreaterThan": 0,
+          "Next": "AnalyzePeriods"
+        }
+      ],
+      "Default": "NothingToDo"
+    },
+    "AnalyzePeriods": {
+      "Type": "Map",
+      "ItemsPath": "$.plan.periods",
+      "MaxConcurrency": 2,
+      "ResultPath": "$.results",
+      "ItemProcessor": {
+        "StartAt": "RunAnalytics",
+        "States": {
+          "RunAnalytics": {
+            "Type": "Task",
+            "Resource": "${run_analytics_arn}",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 2,
+                "BackoffRate": 2
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "ResultPath": "$.error",
+                "Next": "PeriodFailed"
+              }
+            ],
+            "Next": "Published"
+          },
+          "Published": {
+            "Type": "Succeed"
+          },
+          "PeriodFailed": {
+            "Type": "Fail",
+            "Error": "AnalyticsFailed",
+            "Cause": "S1-S8 calculation failed for one period; check execution logs"
+          }
+        }
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "Done"
+    },
+    "Done": {
+      "Type": "Succeed"
+    },
+    "NothingToDo": {
+      "Type": "Succeed"
+    },
+    "NotifyFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${alert_topic_arn}",
+        "Subject": "iot-dt analytics failed",
+        "Message.$": "States.JsonToString($)"
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.notify_error",
+          "Next": "PipelineFailed"
+        }
+      ],
+      "Next": "PipelineFailed"
+    },
+    "PipelineFailed": {
+      "Type": "Fail",
+      "Error": "PipelineFailed",
+      "Cause": "Heat analytics pipeline failed; alert sent to SNS"
+    }
+  }
+}

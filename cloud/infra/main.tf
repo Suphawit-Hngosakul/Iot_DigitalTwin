@@ -151,3 +151,23 @@ module "curated_merge" {
   trigger_enabled   = var.curated_merge_trigger_enabled
   daily_schedule    = var.curated_merge_daily_schedule
 }
+
+# Heat analytics S1-S8 (Spec 60 §3-4, #33): reads iot_walking.cell_period ->
+# writes JSON + Parquet reports to curated/analytics/.
+module "analytics" {
+  count             = var.analytics_enabled ? 1 : 0
+  source            = "./modules/analytics"
+  name_prefix       = var.name_prefix
+  role_arn          = data.aws_iam_role.lab.arn
+  bucket_name       = module.storage.bucket_name
+  functions_dir     = "${path.root}/../analytics/functions"
+  stats_dir         = "${path.root}/../analytics/stats"
+  common_dir        = "${path.root}/../pipeline/common"
+  statemachine_file = "${path.root}/../analytics/statemachine/analytics.asl.json"
+  alert_topic_arn   = module.pipeline.alert_topic_arn
+  athena_database   = module.catalog.database_name
+  athena_workgroup  = module.catalog.workgroup_name
+  pandas_layer_arn  = var.pandas_layer_arn
+  trigger_enabled   = var.analytics_trigger_enabled
+  weekly_schedule   = var.analytics_weekly_schedule
+}
