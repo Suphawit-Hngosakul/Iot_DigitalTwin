@@ -304,11 +304,16 @@ def test_state_machine_is_wired():
     check(asl["States"], asl["StartAt"])
     inner = asl["States"]["MergePeriods"]["ItemProcessor"]["States"]
     assert "WaitingForOtherSources" in inner
-    # one failed period alerts and stops only itself, the next periods still merge
-    assert asl["States"]["MergePeriods"]["ToleratedFailurePercentage"] == 100
+    # one failed period alerts and stops only itself, the next periods still merge;
+    # inline Map ignores ToleratedFailurePercentage, so no Fail state may sit inside the Map
+    assert "ToleratedFailurePercentage" not in asl["States"]["MergePeriods"]
+    assert not [n for n, s in inner.items() if s["Type"] == "Fail"]
     for name in ("CheckSources", "MergeCurated", "VerifyCurated"):
         assert inner[name]["Catch"][0]["Next"] == "NotifyIterationFailure"
     assert inner["NotifyIterationFailure"]["Next"] == "IterationFailed"
+    assert inner["IterationFailed"]["Type"] == "Pass" and inner["IterationFailed"]["Result"] == {"status": "FAILED"}
+    assert asl["States"]["MergePeriods"]["Next"] == "CheckIterations"
+    assert asl["States"]["AnyPeriodFailed?"]["Choices"][0]["Next"] == "SomePeriodsFailed"
     text = json.dumps(asl)
     assert set(re.findall(r"\$\{(\w+)\}", text)) == {
         "plan_merge_arn", "check_sources_arn", "merge_curated_arn", "verify_curated_arn", "alert_topic_arn"}

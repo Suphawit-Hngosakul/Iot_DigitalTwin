@@ -1,5 +1,5 @@
 {
-  "Comment": "curated-merge (spec 60 \u00a72.1, D23): merges satellite_grid + buildings_grid + readings_1min into Iceberg iot_walking.cell_period, one period at a time. Terraform fills the ARN placeholders with templatefile().",
+  "Comment": "curated-merge (spec 60 §2.1, D23): merges satellite_grid + buildings_grid + readings_1min into Iceberg iot_walking.cell_period, one period at a time. Terraform fills the ARN placeholders with templatefile().",
   "StartAt": "PlanMerge",
   "States": {
     "PlanMerge": {
@@ -44,7 +44,6 @@
       "Type": "Map",
       "ItemsPath": "$.plan.periods",
       "MaxConcurrency": 1,
-      "ToleratedFailurePercentage": 100,
       "ResultPath": "$.results",
       "ItemProcessor": {
         "StartAt": "CheckSources",
@@ -167,9 +166,13 @@
             "Next": "IterationFailed"
           },
           "IterationFailed": {
-            "Type": "Fail",
-            "Error": "MergeFailed",
-            "Cause": "A curated-merge step failed for one period (alert sent); the other periods still run"
+            "Type": "Pass",
+            "Comment": "Inline Map has no ToleratedFailurePercentage (Distributed Map only): end this period in success with outcome FAILED so the other periods keep running; CheckIterations fails the execution afterwards",
+            "Result": {
+              "status": "FAILED"
+            },
+            "ResultPath": "$.outcome",
+            "End": true
           }
         }
       },
@@ -182,7 +185,32 @@
           "Next": "NotifyFailure"
         }
       ],
-      "Next": "Done"
+      "Next": "CheckIterations"
+    },
+    "CheckIterations": {
+      "Type": "Pass",
+      "Comment": "Collect periods whose iteration ended in IterationFailed",
+      "Parameters": {
+        "items.$": "$.results[?(@.outcome.status == 'FAILED')]"
+      },
+      "ResultPath": "$.failed_periods",
+      "Next": "AnyPeriodFailed?"
+    },
+    "AnyPeriodFailed?": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.failed_periods.items[0]",
+          "IsPresent": true,
+          "Next": "SomePeriodsFailed"
+        }
+      ],
+      "Default": "Done"
+    },
+    "SomePeriodsFailed": {
+      "Type": "Fail",
+      "Error": "SomePeriodsFailed",
+      "Cause": "curated-merge: at least one period failed (SNS alert sent per period); the other periods finished"
     },
     "Done": {
       "Type": "Succeed"

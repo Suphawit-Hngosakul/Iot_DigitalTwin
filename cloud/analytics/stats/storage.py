@@ -38,7 +38,13 @@ def load_cell_period_df(
         f"SELECT * FROM {database}.{cu.TABLE} "
         f"WHERE period = '{period}' AND in_cover = true"
     )
-    qid = cu.run_query(athena, sql, workgroup, database, timeout_s=QUERY_TIMEOUT_S)
+    try:
+        qid = cu.run_query(athena, sql, workgroup, database, timeout_s=QUERY_TIMEOUT_S)
+    except cu.AthenaError as exc:
+        # curated-merge creates cell_period on its first MERGE; before that there is simply no data
+        if "TABLE_NOT_FOUND" in str(exc):
+            return pd.DataFrame()
+        raise
     exec_info = athena.get_query_execution(QueryExecutionId=qid)["QueryExecution"]
     out_uri = exec_info.get("ResultConfiguration", {}).get("OutputLocation", "")
 
