@@ -166,3 +166,21 @@ variable "curated_merge_daily_schedule" {
   type        = string
   default     = "cron(0 10 * * ? *)"
 }
+
+variable "analytics_enabled" {
+  description = "Deploy heat analytics S1-S8 (#33, Spec 60 §3-4)"
+  type        = bool
+  default     = false
+}
+
+variable "analytics_trigger_enabled" {
+  description = "Run analytics automatically when curated-merge publishes a period + weekly schedule"
+  type        = bool
+  default     = true
+}
+
+variable "analytics_weekly_schedule" {
+  description = "Weekly Scheduler expression (Asia/Bangkok) for analytics refresh; \"\" = none"
+  type        = string
+  default     = "cron(0 11 ? * SUN *)"
+}

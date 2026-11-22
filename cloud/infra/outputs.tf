@@ -76,3 +76,8 @@ output "curated_merge_state_machine_arn" {
   description = "curated-merge (#32); start by hand with {\"periods\": [\"scene_2024-03-17\"], \"mode\": \"force\"} or {} to merge whatever is stale. null when curated_merge_enabled = false"
   value       = one(module.curated_merge[*].state_machine_arn)
 }
+
+output "analytics_state_machine_arn" {
+  description = "Heat analytics (#33); start by hand with {\"periods\": [\"season_2025_03-05\"], \"mode\": \"force\"} or {}. null when analytics_enabled = false"
+  value       = one(module.analytics[*].state_machine_arn)
+}
