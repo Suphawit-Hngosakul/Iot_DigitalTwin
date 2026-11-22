@@ -109,3 +109,19 @@ def test_historical_period_without_iot_does_not_crash():
     assert s4["n"] == 0
     assert s4["r2"] is None
     assert "caveats" in s4
+
+
+def test_tiny_p_values_are_not_rounded_to_zero():
+    df = _synthetic_grid()
+    corr = core.compute_correlation(df, ["lst_mean", "ndbi_mean"])
+    p = corr["p_value"][0][1]
+    assert p is not None and 0.0 < p < 1e-6
+
+
+def test_iot_caveats_describe_the_rows_analysed():
+    df = _synthetic_grid()
+    caveats = core.iot_caveats(df)
+    n_iot = int(df["air_temp_mean"].notna().sum())
+    assert len(caveats) == 3
+    assert f"{n_iot} เซลล์" in caveats[0]
+    assert "2026" not in " ".join(caveats)

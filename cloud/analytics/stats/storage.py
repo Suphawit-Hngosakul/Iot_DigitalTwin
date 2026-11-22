@@ -16,6 +16,8 @@ from common import curated as cu
 
 ANALYTICS_PREFIX = "curated/analytics"
 SUCCESS_ANALYTICS_PREFIX = "curated/_success/analytics"
+# Lambda run_analytics times out at 600 s; stop waiting on Athena early enough to fail cleanly.
+QUERY_TIMEOUT_S = 480.0
 
 
 def key_analytics_marker(period: str) -> str:
@@ -36,7 +38,7 @@ def load_cell_period_df(
         f"SELECT * FROM {database}.{cu.TABLE} "
         f"WHERE period = '{period}' AND in_cover = true"
     )
-    qid = cu.run_query(athena, sql, workgroup, database)
+    qid = cu.run_query(athena, sql, workgroup, database, timeout_s=QUERY_TIMEOUT_S)
     exec_info = athena.get_query_execution(QueryExecutionId=qid)["QueryExecution"]
     out_uri = exec_info.get("ResultConfiguration", {}).get("OutputLocation", "")
 
@@ -58,6 +60,33 @@ def load_cell_period_df(
     return df
 
 
+def existing_period_keys(s3, bucket: str, period: str) -> list[str]:
+    """Every object of an earlier run of `period`: curated/analytics/<report>/period=<p>/... + its marker."""
+    cu.parse_merge_period(period)
+    paginator = s3.get_paginator("list_objects_v2")
+    report_dirs: list[str] = []
+    for page in paginator.paginate(Bucket=bucket, Prefix=f"{ANALYTICS_PREFIX}/", Delimiter="/"):
+        report_dirs += [cp["Prefix"] for cp in page.get("CommonPrefixes", [])]
+    keys: list[str] = []
+    for d in report_dirs:
+        for page in paginator.paginate(Bucket=bucket, Prefix=f"{d}period={period}/"):
+            keys += [o["Key"] for o in page.get("Contents", [])]
+    for page in paginator.paginate(Bucket=bucket, Prefix=key_analytics_marker(period)):
+        keys += [o["Key"] for o in page.get("Contents", []) if o["Key"] == key_analytics_marker(period)]
+    return keys
+
+
+def clear_period(s3, bucket: str, period: str) -> int:
+    """Delete the previous results of `period` so a rerun replaces the whole set (Spec 60 §4)."""
+    keys = existing_period_keys(s3, bucket, period)
+    for i in range(0, len(keys), 1000):
+        s3.delete_objects(
+            Bucket=bucket,
+            Delete={"Objects": [{"Key": k} for k in keys[i:i + 1000]], "Quiet": True},
+        )
+    return len(keys)
+
+
 def write_analytics_bundle(
     s3,
     bucket: str,
@@ -67,6 +96,8 @@ def write_analytics_bundle(
     """Write Parquet tables, ready-to-serve JSON payloads, and the _success marker."""
     period = bundle["period"]
     written_keys: list[str] = []
+    # 0. Remove the earlier run first: a table that is empty this time must not keep last run's file
+    clear_period(s3, bucket, period)
 
     # 1. Ready-to-serve JSON files for API (#34) & Web (#37)
     for report_name, by_match in bundle["json"].items():

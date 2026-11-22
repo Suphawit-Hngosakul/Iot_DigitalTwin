@@ -44,6 +44,7 @@
       "Type": "Map",
       "ItemsPath": "$.plan.periods",
       "MaxConcurrency": 2,
+      "ToleratedFailurePercentage": 100,
       "ResultPath": "$.results",
       "ItemProcessor": {
         "StartAt": "RunAnalytics",
@@ -70,18 +71,52 @@
                   "States.ALL"
                 ],
                 "ResultPath": "$.error",
-                "Next": "PeriodFailed"
+                "Next": "NotifyIterationFailure"
               }
             ],
-            "Next": "Published"
+            "Next": "PublishedOrNoData?"
+          },
+          "PublishedOrNoData?": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.analytics.status",
+                "StringEquals": "NO_DATA",
+                "Next": "NoData"
+              }
+            ],
+            "Default": "Published"
+          },
+          "NoData": {
+            "Type": "Succeed",
+            "Comment": "cell_period has no in_cover rows for this period; no marker written"
           },
           "Published": {
             "Type": "Succeed"
           },
-          "PeriodFailed": {
+          "NotifyIterationFailure": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sns:publish",
+            "Parameters": {
+              "TopicArn": "${alert_topic_arn}",
+              "Subject": "iot-dt analytics failed for one period",
+              "Message.$": "States.JsonToString($)"
+            },
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "ResultPath": "$.notify_error",
+                "Next": "IterationFailed"
+              }
+            ],
+            "Next": "IterationFailed"
+          },
+          "IterationFailed": {
             "Type": "Fail",
             "Error": "AnalyticsFailed",
-            "Cause": "S1-S8 calculation failed for one period; check execution logs"
+            "Cause": "S1-S8 calculation failed for one period; other periods continue (ToleratedFailurePercentage 100)"
           }
         }
       },

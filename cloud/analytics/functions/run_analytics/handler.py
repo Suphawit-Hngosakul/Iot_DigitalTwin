@@ -34,6 +34,13 @@ def run_for_period(
 ) -> dict:
     period = event["period"]
     df = st.load_cell_period_df(athena, s3, period=period, workgroup=workgroup, database=database)
+    if df.empty:
+        # cell_period has no in_cover rows (merge not done, or a mistyped period): publish nothing
+        removed = st.clear_period(s3, bucket=bucket, period=period)
+        return {
+            **event,
+            "analytics": {"status": "NO_DATA", "rows_loaded": 0, "removed_keys": removed},
+        }
     bundle = runner.build_analytics_outputs(df, period=period)
     marker = st.write_analytics_bundle(s3, bucket=bucket, bundle=bundle)
     return {

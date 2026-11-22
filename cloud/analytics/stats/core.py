@@ -32,11 +32,22 @@ BLOCK_SIZE_CELLS = 5  # 5 x 90m = 450m spatial blocks (Roberts et al., 2017)
 
 _CELL_RE = re.compile(r"^c(?P<col>\d{4})_r(?P<row>\d{4})$")
 
-IOT_VALIDATION_CAVEATS = [
-    "ข้อมูลเซนเซอร์ภาคสนามมีเพียง 1 วัน (1 มี.ค. 2026) ระยะเวลาประมาณ 1 ชั่วโมง 18 นาที ตามเส้นทางเดินเดียว ครอบคลุมเซลล์ขนาด 90 ม. เพียงไม่กี่สิบเซลล์ ทำให้พลังทางสถิติ (statistical power) ต่ำ",
-    "ค่า LST ในตารางเป็นค่าจากภาพถ่ายดาวเทียมช่วงเดือน มี.ค.–พ.ค. ปี 2021–2025 ส่วนข้อมูลเซนเซอร์เก็บในวันเดียวของปี 2026 ช่วงเวลาจึงไม่ตรงกันโดยสมบูรณ์",
-    "LST คืออุณหภูมิพื้นผิว (Land Surface Temperature) ขณะที่เซนเซอร์วัดอุณหภูมิอากาศ (Air Temperature) ซึ่งแตกต่างกันตามธรรมชาติ จึงควรดูความสอดคล้องของอันดับสูง–ต่ำ (rank order) ไม่ใช่การเทียบตัวเลขให้เท่ากัน",
-]
+def iot_caveats(df: pd.DataFrame) -> list[str]:
+    """Caveats for IoT-vs-satellite results, built from the rows actually analysed."""
+    n_cells = 0
+    minutes = None
+    if "air_temp_mean" in df.columns:
+        n_cells = int(pd.to_numeric(df["air_temp_mean"], errors="coerce").notna().sum())
+    if "n_iot_minutes" in df.columns:
+        minutes = int(pd.to_numeric(df["n_iot_minutes"], errors="coerce").fillna(0).sum())
+    extent = f"มีข้อมูลเซนเซอร์ภาคสนามใน {n_cells} เซลล์ขนาด 90 ม."
+    if minutes is not None:
+        extent += f" รวม {minutes} นาที-เซลล์"
+    return [
+        extent + " ถ้าจำนวนเซลล์น้อย พลังทางสถิติ (statistical power) จะต่ำ",
+        "ค่า LST มาจากภาพถ่ายดาวเทียมของ period นี้ ส่วนข้อมูลเซนเซอร์อาจเก็บคนละวันหรือคนละปี ช่วงเวลาจึงไม่ตรงกันโดยสมบูรณ์",
+        "LST คืออุณหภูมิพื้นผิว (Land Surface Temperature) ขณะที่เซนเซอร์วัดอุณหภูมิอากาศ (Air Temperature) ซึ่งแตกต่างกันตามธรรมชาติ จึงควรดูความสอดคล้องของอันดับสูง–ต่ำ (rank order) ไม่ใช่การเทียบตัวเลขให้เท่ากัน",
+    ]
 
 
 def sanitize(obj: Any) -> Any:
@@ -59,6 +70,16 @@ def _r(val: float | None, digits: int = 4) -> float | None:
     if val is None or math.isnan(val) or math.isinf(val):
         return None
     return round(float(val), digits)
+
+
+def _p(val: float | None) -> float | None:
+    """p-value kept to 3 significant figures so tiny values (e.g. 1.6e-16) do not round to 0."""
+    if val is None or math.isnan(val) or math.isinf(val):
+        return None
+    v = float(val)
+    if v <= 0.0:
+        return 0.0
+    return float(f"{v:.3g}")
 
 
 def parse_cell_coords(cell_ids: pd.Series) -> tuple[np.ndarray, np.ndarray]:
@@ -242,9 +263,9 @@ def compute_correlation(df: pd.DataFrame, variables: list[str]) -> dict:
             rb = pair["b"].rank(method="average").to_numpy(dtype=np.float64)
             sr, sp = _pair_corr(ra, rb)
             r_mat[i][j] = _r(pr, 3)
-            p_mat[i][j] = _r(pp, 4)
+            p_mat[i][j] = _p(pp)
             sr_mat[i][j] = _r(sr, 3)
-            sp_mat[i][j] = _r(sp, 4)
+            sp_mat[i][j] = _p(sp)
 
     return {
         "method": "pearson",
@@ -268,7 +289,7 @@ def validate_iot_vs_lst(df: pd.DataFrame) -> dict:
             "pearson_r": None,
             "pearson_p": None,
             "status": "no_iot_overlap",
-            "caveats": IOT_VALIDATION_CAVEATS,
+            "caveats": iot_caveats(df),
         }
     sub = df[["lst_mean", "air_temp_mean"]].apply(pd.to_numeric, errors="coerce").dropna()
     n = int(len(sub))
@@ -280,7 +301,7 @@ def validate_iot_vs_lst(df: pd.DataFrame) -> dict:
             "pearson_r": None,
             "pearson_p": None,
             "status": "insufficient_matched_cells",
-            "caveats": IOT_VALIDATION_CAVEATS,
+            "caveats": iot_caveats(df),
         }
     lst = sub["lst_mean"].to_numpy(dtype=np.float64)
     air = sub["air_temp_mean"].to_numpy(dtype=np.float64)
@@ -292,12 +313,12 @@ def validate_iot_vs_lst(df: pd.DataFrame) -> dict:
     return {
         "n_matched_cells": n,
         "spearman_r": _r(sr, 3),
-        "spearman_p": _r(sp, 4),
+        "spearman_p": _p(sp),
         "pearson_r": _r(pr, 3),
-        "pearson_p": _r(pp, 4),
+        "pearson_p": _p(pp),
         "evaluation_basis": "rank_order_consistency",
         "status": "evaluated_with_caveats",
-        "caveats": IOT_VALIDATION_CAVEATS,
+        "caveats": iot_caveats(df),
     }
 
 
@@ -476,7 +497,7 @@ def compute_regression(
             "warnings": [f"ข้อมูลมีจำนวนเซลล์ที่สมบูรณ์เพียง {n} เซลล์ ไม่เพียงพอสำหรับถดถอยพหุ"],
         }
         if y_col == "air_temp_mean":
-            out["caveats"] = IOT_VALIDATION_CAVEATS
+            out["caveats"] = iot_caveats(df)
         return out, pd.DataFrame(columns=["cell_id", "fitted", "residual"])
 
     y = sub[y_col].to_numpy(dtype=np.float64)
@@ -527,7 +548,7 @@ def compute_regression(
             "coef": _r(coef, 4),
             "se": _r(se, 4),
             "std_coef": _r(std_coef, 3),
-            "p_value": _r(p_val, 4),
+            "p_value": _p(p_val),
             "ci_95_low": _r(coef - t_crit * se, 4),
             "ci_95_high": _r(coef + t_crit * se, 4),
             "boot_ci_95_low": _r(b_lo, 4),
@@ -560,7 +581,7 @@ def compute_regression(
         "methodology_note": "ใช้วิธีทางสถิติมาตรฐาน (OLS, VIF, Bootstrap 95% CI, Spatial Block CV; Roberts et al., 2017) ส่วนการเปรียบเทียบช่วง P25–P75 เป็นตัวชี้วัดเชิงพรรณนาที่โครงการกำหนดขึ้นเอง",
     }
     if y_col == "air_temp_mean":
-        result["caveats"] = IOT_VALIDATION_CAVEATS
+        result["caveats"] = iot_caveats(df)
     return result, resid_df
 
 
@@ -805,7 +826,7 @@ def compute_hotspot_gi_star(
         cells_out.append({
             "cell_id": str(sub["cell_id"].iloc[i]),
             "gi_z": _r(z, 2),
-            "gi_p": _r(p_val, 4),
+            "gi_p": _p(p_val),
             "class": cls,
         })
 
@@ -883,7 +904,7 @@ def compute_morans_i(df: pd.DataFrame, values: pd.Series, target_name: str) -> d
         "morans_i": _r(moran_i, 3),
         "expected_i": _r(exp_i, 4),
         "z_score": _r(z_score, 2),
-        "p_value": _r(p_val, 4),
+        "p_value": _p(p_val),
         "interpretation": interp,
     }
 
@@ -962,7 +983,7 @@ def compute_groups(
         "test": {
             "name": "kruskal_wallis",
             "statistic": _r(h_stat, 3),
-            "p_value": _r(kw_p, 6),
+            "p_value": _p(kw_p),
         },
     }
 
