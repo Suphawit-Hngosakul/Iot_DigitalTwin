@@ -37,11 +37,6 @@ def _client():
     return _s3
 
 
-def expected_files(batch_id: str) -> list[str]:
-    layers = CELL_LAYERS if ss.batch_kind(batch_id) == "buildings" else PIXEL_LAYERS
-    return [f"{name}.{ext}" for name in layers for ext in ("png", "json")]
-
-
 def render(s3, bucket: str, event: dict) -> dict:
     batch_id = event["batch_id"]
     kind = ss.batch_kind(batch_id)

@@ -3,7 +3,7 @@
 - `ingest/` — Lambda `satellite_ingest` (#27) ดึง Landsat 8/9 (LST, NDVI, NDBI) จาก Google Earth Engine ลง S3 `raw/satellite/` (ดู "satellite_ingest" ด้านล่าง) และสคริปต์ GEE Code Editor (`*.js`, ไม่เข้า zip ของ Lambda)
 - `pipeline/` — Step Functions `iot-dt-sat-pipeline` (#30, #31, spec 51) ตรวจ batch ใน `raw/satellite/` ด้วย data contract แล้วเขียน grid 90 m ลง `trusted/` + PNG layers ลง `curated/satellite/layers/` (ดู `pipeline/README.md`)
 - `layer/` — สูตรสร้าง Lambda layer `earthengine-api` + `google-auth` (ใช้ร่วมกันทั้ง test Lambda และ `satellite_ingest`)
-- `test_lambda/` — Lambda ทดสอบว่าเรียก GEE ได้ (#25)
+- `test_lambda/` — Lambda ทดสอบว่าเรียก GEE ได้ (#25) ใช้ใน `cloud/infra/healthcheck.sh` ข้อ 9
 
 ## ยืนยันตัวกับ GEE (#25)
 

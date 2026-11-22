@@ -3,13 +3,14 @@
 ทุกอย่างที่อยู่บนตัวอุปกรณ์ ทั้งแบบเดินเก็บ (`IOTW-A001`, `IOTW-A002`) และแบบตั้งประจำจุด (station)
 
 อุปกรณ์คือ ESP32 ที่วัดเสียง แสง อุณหภูมิ ความชื้น และพิกัด GPS แล้วบันทึกลง SD card ทุก 1 วินาที พร้อมอัดเสียงดิบเป็นไฟล์ WAV
-**SD card คือแหล่งความจริง** — อัป CSV ขึ้น S3 ทำแล้ว (#7: ส่ง HTTP ผ่าน relay บน EC2 `cloud/relay/` เพราะบอร์ดไม่มี RAM พอสำหรับ TLS) ส่วน realtime (WebSocket, #6) และอัป WAV (#20) ยังไม่ได้ทำ
+**SD card คือแหล่งความจริง** — อัป CSV ขึ้น S3 ทำแล้ว (#7: ส่ง HTTP ผ่าน relay บน EC2 `cloud/relay/` เพราะบอร์ดไม่มี RAM พอสำหรับ TLS) realtime (`ws://` ไป hub บน EC2 เดียวกัน, #6, `firmware/main/rt_client.cpp`) ทำแล้ว ส่วนอัป WAV (#20) ยังไม่ได้ทำ
 
 | โฟลเดอร์ | เนื้อหา |
 |---|---|
 | `firmware/` | Arduino sketch ของ ESP32 (`firmware/main/`) |
 | `hardware/` | ตารางขา, รายการอุปกรณ์, ไฟล์ 3D กล่อง (`hardware/enclosure/*.stl`) |
 | `simulator/` | สคริปต์ Python จำลองอุปกรณ์ (ยังไม่ได้ทำ — issue #8) |
+| `tools/` | `legacy_log.py` แปลง log รุ่นเก่า (`spl_log_*.csv`) เป็น schema ปัจจุบันแล้วส่งเข้า ingest (เทสต์: `python -m pytest -q iot/tools/tests`) |
 
 ---
 

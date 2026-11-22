@@ -44,6 +44,7 @@
       "Type": "Map",
       "ItemsPath": "$.plan.periods",
       "MaxConcurrency": 1,
+      "ToleratedFailurePercentage": 100,
       "ResultPath": "$.results",
       "ItemProcessor": {
         "StartAt": "CheckSources",
@@ -70,7 +71,7 @@
                   "States.ALL"
                 ],
                 "ResultPath": "$.error",
-                "Next": "IterationFailed"
+                "Next": "NotifyIterationFailure"
               }
             ],
             "Next": "SourcesReady?"
@@ -108,7 +109,7 @@
                   "States.ALL"
                 ],
                 "ResultPath": "$.error",
-                "Next": "IterationFailed"
+                "Next": "NotifyIterationFailure"
               }
             ],
             "Next": "VerifyCurated"
@@ -135,7 +136,7 @@
                   "States.ALL"
                 ],
                 "ResultPath": "$.error",
-                "Next": "IterationFailed"
+                "Next": "NotifyIterationFailure"
               }
             ],
             "Next": "Published"
@@ -146,10 +147,29 @@
           "WaitingForOtherSources": {
             "Type": "Succeed"
           },
+          "NotifyIterationFailure": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sns:publish",
+            "Parameters": {
+              "TopicArn": "${alert_topic_arn}",
+              "Subject": "iot-dt curated-merge failed for one period",
+              "Message.$": "States.JsonToString($)"
+            },
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "ResultPath": "$.notify_error",
+                "Next": "IterationFailed"
+              }
+            ],
+            "Next": "IterationFailed"
+          },
           "IterationFailed": {
             "Type": "Fail",
             "Error": "MergeFailed",
-            "Cause": "A curated-merge step failed for one period; see the execution history"
+            "Cause": "A curated-merge step failed for one period (alert sent); the other periods still run"
           }
         }
       },

@@ -137,7 +137,6 @@ def test_duplicates_counted_not_failed(s3):
 def test_missing_record_ids(s3):
     rows = [row(1, "2026-11-16 08:00:01"), row(2, "2026-11-16 08:00:02"), row(5, "2026-11-16 08:00:05")]
     put(s3, "12-1-5", to_csv(rows))
-    s = report(s3) if False else None
     validated(s3)
     sess = report(s3)["sessions"][0]
     assert sess["expected_rows"] == 5 and sess["missing_rows"] == 2
@@ -206,12 +205,37 @@ def test_quarantine_copies_files_and_reason(s3):
     ev = validated(s3)
     out = quarantine_fn.quarantine(s3, BUCKET, ev, now=NOW)
     prefix = schema.s3_prefix_quarantine(BATCH)
-    assert out == {"prefix": prefix, "files": 1}
+    assert out == {"prefix": prefix, "files": 1, "unpublished": []}
     assert s3.get_object(Bucket=BUCKET, Key=prefix + "part-12-1-4.csv")["Body"].read() == body
     reason = json.loads(s3.get_object(Bucket=BUCKET, Key=prefix + "reason.json")["Body"].read())
     assert "BAD_HEADER" in reason["reason"]
     # raw untouched
     assert s3.get_object(Bucket=BUCKET, Key=schema.raw_prefix(BATCH) + "part-12-1-4.csv")
+
+
+def test_quarantined_batch_is_skipped_until_files_change(s3):
+    body = (FIXTURES / "good.csv").read_text().replace("Flags", "Flagz").encode()
+    put(s3, "12-1-4", body)
+    quarantine_fn.quarantine(s3, BUCKET, validated(s3), now=NOW)
+    assert checked(s3)["check"]["status"] == check_fn.ALREADY_QUARANTINED
+    assert checked(s3, mode="force")["check"]["status"] == check_fn.NEW
+    put(s3, "12-5-8", to_csv(good_rows()))                # new chunk -> look again
+    assert checked(s3)["check"]["status"] == check_fn.NEW
+
+
+def test_published_then_failing_batch_is_unpublished(s3):
+    put(s3, "12-1-4", (FIXTURES / "good.csv").read_bytes())
+    run_all(s3)
+    assert checked(s3)["check"]["status"] == check_fn.ALREADY_PROCESSED
+    put(s3, "12-5-8", to_csv(good_rows()).replace(b"Flags", b"Flagz"))   # backfill with a bad header
+    ev = validated(s3)
+    assert ev["check"]["status"] == check_fn.CHANGED and ev["validation"]["status"] == "FAIL"
+    out = quarantine_fn.quarantine(s3, BUCKET, ev, now=NOW)
+    assert schema.s3_key_manifest(BATCH) in out["unpublished"]
+    assert schema.s3_key_table("readings_1s", BATCH) in out["unpublished"]
+    for prefix in ("trusted/", "curated/"):
+        assert "Contents" not in s3.list_objects_v2(Bucket=BUCKET, Prefix=prefix)
+    assert checked(s3)["check"]["status"] == check_fn.ALREADY_QUARANTINED
 
 
 # ── TransformBatch ───────────────────────────────────────────────────────────
@@ -293,6 +317,17 @@ def test_speed_filter_nulls_jump(s3):
     assert lats[1] is None and lats[2] is not None
 
 
+def test_speed_filter_reanchors_after_bad_first_fix(s3):
+    # the first fix is ~1.1 km off, every later point is right: only 3 are lost
+    rows = [row(1, "2026-11-16 08:00:01", Latitude="14.0817281")]
+    rows += [row(i, f"2026-11-16 08:00:{i:02d}") for i in range(2, 11)]
+    put(s3, "12-1-10", to_csv(rows))
+    ev = run_all(s3)
+    assert ev["transform"]["gps_speed_nulled"] == 3
+    lats = [r["lat"] for r in read_table(s3, "readings_1s")]
+    assert lats[1:4] == [None, None, None] and all(x is not None for x in lats[4:])
+
+
 def test_station_uses_registry_position(s3):
     rows = [row(i, f"2026-11-16 08:30:0{i}", Device_Type="Stationary") for i in range(1, 4)]
     put(s3, "12-1-3", to_csv(rows))
@@ -329,6 +364,26 @@ def test_verify_mismatch_raises(s3):
 def test_count_data_lines_matches_parser():
     body = (FIXTURES / "good.csv").read_bytes() + b"\n\n"
     assert batch_eval.count_data_lines(body) == len(batch_eval.parse_file("k", body).rows) == 4
+
+
+def test_stray_quote_does_not_swallow_following_lines(s3):
+    rows = [row(i, f"2026-11-16 08:00:{i:02d}") for i in range(1, 6)]
+    body = to_csv(rows).decode().splitlines()
+    body[2] = body[2].replace(",Mobile,", ',"Mobile,', 1)    # corrupt line 3 (record 2)
+    body = ("\n".join(body) + "\n").encode()
+    assert batch_eval.count_data_lines(body) == len(batch_eval.parse_file("k", body).rows) == 5
+    put(s3, "12-1-5", body)
+    ev = run_all(s3)                                          # VerifyBatch must not raise
+    assert ev["verify"]["rows"] == {"raw": 5, "trusted": 4, "quarantined": 1, "duplicate": 0}
+
+
+def test_time_jump_uses_device_interval(s3):
+    # CSV_INTERVAL_MS = 10000: one row every 10 s is normal, a 2 min gap is a jump
+    times = ["08:00:00", "08:00:10", "08:00:20", "08:00:30", "08:02:30"]
+    rows = [row(i, f"2026-11-16 {t}") for i, t in enumerate(times, start=1)]
+    put(s3, "12-1-5", to_csv(rows))
+    validated(s3)
+    assert report(s3)["flag_counts"]["TIME_JUMP"] == 1
 
 
 def test_readings_1min_populates_cell_id(s3):

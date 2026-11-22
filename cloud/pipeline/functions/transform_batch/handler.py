@@ -10,7 +10,9 @@ Overwrites the batch's files (idempotent). Raw is not touched.
 
 Rows: duplicates and DROP-flagged rows removed (batch_eval), values nulled by
 flag (schema.clean_row). Mobile: GPS points implying > 30 km/h from the last
-accepted point are nulled. Stationary: lat/lon from devices.csv. cell_id is
+accepted point are nulled (after 3 in a row the
+next point re-anchors, so one bad first fix cannot null the rest of the hour).
+Stationary: lat/lon from devices.csv. cell_id is
 assigned from lat/lon via common/grid.py (#29). Needs pyarrow (Lambda layer
 AWS SDK for pandas).
 """
@@ -33,6 +35,7 @@ log = logging.getLogger()
 log.setLevel(logging.INFO)
 
 MAX_WALK_SPEED_KMH = 30.0
+MAX_REJECT_RUN = 3          # rejected points in a row before re-anchoring
 
 _s3 = None
 
@@ -71,19 +74,25 @@ def readings_1s(ev: batch_eval.BatchEval, devices) -> tuple[list[dict], int]:
 
     nulled = 0
     last: dict = {}                       # session -> last accepted (ts, lat, lon)
+    run: dict = {}                        # session -> points rejected in a row
     for rec in recs:
         if rec["device_type"] == "Stationary" or rec["lat"] is None or rec["lon"] is None:
             continue
-        prev = last.get(rec["session"])
-        if prev is not None:
+        s = rec["session"]
+        prev = last.get(s)
+        if prev is not None and run.get(s, 0) < MAX_REJECT_RUN:
             dt = (rec["ts_local"] - prev[0]).total_seconds()
             if dt > 0:
                 kmh = _haversine_m(prev[1], prev[2], rec["lat"], rec["lon"]) / dt * 3.6
                 if kmh > MAX_WALK_SPEED_KMH:
                     _null_gps(rec)
                     nulled += 1
+                    run[s] = run.get(s, 0) + 1
                     continue
-        last[rec["session"]] = (rec["ts_local"], rec["lat"], rec["lon"])
+        # accepted; after MAX_REJECT_RUN rejections in a row the anchor itself was
+        # probably the bad fix, so this point becomes the new anchor
+        last[s] = (rec["ts_local"], rec["lat"], rec["lon"])
+        run[s] = 0
     return recs, nulled
 
 
