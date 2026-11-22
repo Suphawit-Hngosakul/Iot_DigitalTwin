@@ -40,7 +40,8 @@ locals {
   stats_files  = ["__init__.py", "core.py", "runner.py", "storage.py"]
 
   functions = {
-    plan_analytics = { timeout = 120, memory = 256, use_pandas = false }
+    # both handlers import stats/ (numpy, pandas, pyarrow) -> both need the AWS SDK for pandas layer
+    plan_analytics = { timeout = 120, memory = 512, use_pandas = true }
     run_analytics  = { timeout = 600, memory = 1024, use_pandas = true }
   }
 }

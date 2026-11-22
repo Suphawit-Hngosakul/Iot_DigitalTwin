@@ -16,7 +16,7 @@
   - **`cell_attribution`**: ผลวิเคราะห์ระดับเซลล์ 90×90 ม. สำหรับคลิกดูสาเหตุความร้อนรายช่องบนแผนที่
 - `functions/` & `statemachine/analytics.asl.json`: Step Functions `iot-dt-analytics` ทำงานอัตโนมัติเมื่อ `curated/_success/merge/<period>.json` ถูกสร้าง และรายสัปดาห์ (อาทิตย์ 11:00 น., `mode=force` คำนวณใหม่ทุก period) เปิดด้วย `analytics_enabled = true`
   - PlanAnalytics → Map ทีละ period: RunAnalytics → `Published` หรือ `NoData` (ไม่มีแถว `in_cover` → ไม่เขียน marker)
-  - Catch ใน Map → NotifyIterationFailure (SNS) → IterationFailed ล้มเฉพาะ period นั้น (`ToleratedFailurePercentage` 100)
+  - Catch ใน Map → NotifyIterationFailure (SNS) → IterationFailed (Pass, `outcome.status = FAILED`) ล้มเฉพาะ period นั้น period อื่นรันต่อ แล้ว CheckIterations → SomePeriodsFailed (Fail) ถ้ามี period ไหนล้ม (Map แบบ inline ไม่รองรับ `ToleratedFailurePercentage`)
   - รันใหม่ลบผลเดิมของ period นั้นทั้งชุดก่อนเขียน (idempotent)
 
 ## Output

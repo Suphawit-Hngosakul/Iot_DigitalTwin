@@ -143,12 +143,66 @@ def test_period_without_rows_is_no_data_and_writes_no_marker(monkeypatch):
 def test_statemachine_tolerates_one_failed_period_and_alerts():
     asl = json.loads((Path(__file__).resolve().parents[1] / "statemachine" / "analytics.asl.json").read_text())
     m = asl["States"]["AnalyzePeriods"]
-    assert m["ToleratedFailurePercentage"] == 100
+    # inline Map ignores ToleratedFailurePercentage (Distributed Map only): a Fail state inside
+    # would abort every other period, so a failed period ends in a Pass and is checked afterwards
+    assert "ToleratedFailurePercentage" not in m
     inner = m["ItemProcessor"]["States"]
+    assert not [n for n, s in inner.items() if s["Type"] == "Fail"]
     assert inner["RunAnalytics"]["Catch"][0]["Next"] == "NotifyIterationFailure"
     assert inner["NotifyIterationFailure"]["Next"] == "IterationFailed"
-    assert inner["IterationFailed"]["Type"] == "Fail"
+    assert inner["IterationFailed"]["Type"] == "Pass" and inner["IterationFailed"]["End"] is True
+    assert inner["IterationFailed"]["Result"] == {"status": "FAILED"}
+    assert m["ResultPath"] == "$.results" and m["Next"] == "CheckIterations"
+    check = asl["States"]["CheckIterations"]
+    assert check["Parameters"]["items.$"] == "$.results[?(@.outcome.status == 'FAILED')]"
+    choice = asl["States"]["AnyPeriodFailed?"]["Choices"][0]
+    assert choice["Variable"] == "$.failed_periods.items[0]" and choice["Next"] == "SomePeriodsFailed"
+    assert asl["States"]["SomePeriodsFailed"]["Type"] == "Fail"
     assert inner["RunAnalytics"]["Next"] == "PublishedOrNoData?"
     choice = inner["PublishedOrNoData?"]
     assert choice["Choices"][0]["StringEquals"] == "NO_DATA" and choice["Choices"][0]["Next"] == "NoData"
     assert inner["NoData"]["Type"] == "Succeed" and inner["Published"]["Type"] == "Succeed"
+
+
+def test_missing_cell_period_table_is_no_data():
+    """Before curated-merge's first MERGE the Iceberg table does not exist yet."""
+    from common import curated as cu
+
+    class Athena:
+        def start_query_execution(self, **kw):
+            return {"QueryExecutionId": "q1"}
+
+        def get_query_execution(self, QueryExecutionId):
+            return {"QueryExecution": {"Status": {
+                "State": "FAILED",
+                "StateChangeReason": "TABLE_NOT_FOUND: line 1:15: Table 'awsdatacatalog.iot_walking.cell_period' does not exist",
+            }}}
+
+    df = run_h.st.load_cell_period_df(Athena(), FakeS3(), period="season_2025_03-05", workgroup="wg")
+    assert df.empty
+
+    class BrokenAthena(Athena):
+        def get_query_execution(self, QueryExecutionId):
+            return {"QueryExecution": {"Status": {"State": "FAILED", "StateChangeReason": "SYNTAX_ERROR: boom"}}}
+
+    import pytest
+    with pytest.raises(cu.AthenaError):
+        run_h.st.load_cell_period_df(BrokenAthena(), FakeS3(), period="season_2025_03-05", workgroup="wg")
+
+
+def test_every_lambda_that_imports_stats_gets_the_pandas_layer():
+    """stats/ needs numpy, pandas and pyarrow, which Lambda only has through the layer.
+
+    plan_analytics once had use_pandas = false and failed on import in AWS
+    (every run ended in PipelineFailed) while tests passed locally.
+    """
+    import re
+
+    root = Path(__file__).resolve().parents[2]
+    tf = (root / "infra" / "modules" / "analytics" / "main.tf").read_text(encoding="utf-8")
+    flags = dict(re.findall(r"^\s*(\w+)[ \t]*=[ \t]*\{[^}\n]*use_pandas\s*=\s*(true|false)", tf, re.M))
+    assert flags, "functions map not found in modules/analytics/main.tf"
+    for name, use_pandas in flags.items():
+        src = (root / "analytics" / "functions" / name / "handler.py").read_text(encoding="utf-8")
+        if re.search(r"^\s*from stats\b|^\s*import stats\b", src, re.M):
+            assert use_pandas == "true", f"{name} imports stats but has use_pandas = false"
