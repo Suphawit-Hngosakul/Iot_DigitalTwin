@@ -1,0 +1,2 @@
+# สำหรับรันเทสต์ในเครื่อง (legacy_log.py ใช้แค่ stdlib)
+pytest
