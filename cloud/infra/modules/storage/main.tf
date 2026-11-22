@@ -15,6 +15,12 @@ variable "region" {
   default = "us-east-1"
 }
 
+variable "cors_allowed_origins" {
+  description = "Origins allowed to GET objects with a presigned URL from the browser (layer PNGs of /layers, #34). [] = no CORS rule."
+  type        = list(string)
+  default     = []
+}
+
 # Learner Lab: the aws_s3_bucket resource always reads the bucket's Object Lock
 # configuration, and the Learner Lab SCP denies s3:GetBucketObjectLockConfiguration
 # (403) -> plan/apply fails (c3d9ba3). So the bucket is created with the AWS CLI
@@ -87,6 +93,22 @@ resource "aws_s3_bucket_lifecycle_configuration" "data" {
     abort_incomplete_multipart_upload {
       days_after_initiation = 1
     }
+  }
+}
+
+# CORS for the web (#34 / #36): MapLibre loads layer PNGs with fetch(), so the
+# presigned GET from /layers needs Access-Control-Allow-Origin. The bucket stays
+# private (public access block above); this only lets a browser read a response
+# it already has a valid presigned URL for.
+resource "aws_s3_bucket_cors_configuration" "data" {
+  count  = length(var.cors_allowed_origins) > 0 ? 1 : 0
+  bucket = local.bucket_name
+
+  cors_rule {
+    allowed_methods = ["GET", "HEAD"]
+    allowed_origins = var.cors_allowed_origins
+    allowed_headers = ["*"]
+    max_age_seconds = 3600
   }
 }
 
