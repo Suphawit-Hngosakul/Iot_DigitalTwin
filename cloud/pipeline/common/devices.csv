@@ -1,4 +1,3 @@
 device_id,device_type,fixed_lat,fixed_lon,site_name,valid_from,valid_to,note
 IOTW-A001,Mobile,,,,2026-03-01,,walking device 1 (from 2026-03-01: legacy spl_log imported via iot/tools/legacy_log.py)
 IOTW-A002,Mobile,,,,2026-11-01,,walking device 2
-    
