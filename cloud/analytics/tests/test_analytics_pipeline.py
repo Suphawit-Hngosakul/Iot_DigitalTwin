@@ -152,3 +152,21 @@ def test_statemachine_tolerates_one_failed_period_and_alerts():
     choice = inner["PublishedOrNoData?"]
     assert choice["Choices"][0]["StringEquals"] == "NO_DATA" and choice["Choices"][0]["Next"] == "NoData"
     assert inner["NoData"]["Type"] == "Succeed" and inner["Published"]["Type"] == "Succeed"
+
+
+def test_every_lambda_that_imports_stats_gets_the_pandas_layer():
+    """stats/ needs numpy, pandas and pyarrow, which Lambda only has through the layer.
+
+    plan_analytics once had use_pandas = false and failed on import in AWS
+    (every run ended in PipelineFailed) while tests passed locally.
+    """
+    import re
+
+    root = Path(__file__).resolve().parents[2]
+    tf = (root / "infra" / "modules" / "analytics" / "main.tf").read_text(encoding="utf-8")
+    flags = dict(re.findall(r"^\s*(\w+)[ \t]*=[ \t]*\{[^}\n]*use_pandas\s*=\s*(true|false)", tf, re.M))
+    assert flags, "functions map not found in modules/analytics/main.tf"
+    for name, use_pandas in flags.items():
+        src = (root / "analytics" / "functions" / name / "handler.py").read_text(encoding="utf-8")
+        if re.search(r"^\s*from stats\b|^\s*import stats\b", src, re.M):
+            assert use_pandas == "true", f"{name} imports stats but has use_pandas = false"
