@@ -61,5 +61,9 @@ satellite_pipeline_enabled = false
 // C. Athena MERGE -> ตาราง Iceberg iot_walking.cell_period (ต้องเปิด B ก่อน และ apply catalog ให้เสร็จก่อน)
 curated_merge_enabled = false
 
+// D. สถิติ S1-S8 (#33) อ่าน cell_period -> curated/analytics/ (ต้องเปิด C ก่อน)
+//    รันเองหลัง merge เสร็จ + รายสัปดาห์ (อาทิตย์ 11:00 น.) คำนวณใหม่ทุก period
+analytics_enabled = false
+
 
 // ตัวเลือกอื่นทั้งหมด (CORS, ตั้งเวลา, ค่า GEE, threshold ฯลฯ) มี default ใน variables.tf ไม่ต้องใส่

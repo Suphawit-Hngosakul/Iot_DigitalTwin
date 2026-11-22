@@ -30,7 +30,7 @@ variable "trigger_enabled" {
 }
 
 variable "weekly_schedule" {
-  description = "Weekly EventBridge Scheduler expression (Asia/Bangkok) to refresh stats as IoT accumulates"
+  description = "Weekly EventBridge Scheduler expression (Asia/Bangkok): recompute every merged period (mode=force)"
   type        = string
   default     = "cron(0 11 ? * SUN *)"
 }
@@ -155,7 +155,9 @@ resource "aws_scheduler_schedule" "weekly" {
   target {
     arn      = aws_sfn_state_machine.analytics.arn
     role_arn = var.role_arn
-    input    = "{\"scheduled\":true}"
+    # mode=force: recompute every merged period, not only those whose merge marker is newer
+    # (that case already runs from the merge_published rule)
+    input = "{\"scheduled\":true,\"mode\":\"force\"}"
 
     retry_policy {
       maximum_retry_attempts = 0
