@@ -47,6 +47,9 @@ def validate(s3, bucket: str, event: dict, now: datetime | None = None) -> dict:
                           (ss.s3_key_quarantine_duplicate(batch_id), res.duplicates)):
             if rows:
                 s3.put_object(Bucket=bucket, Key=key, ContentType="text/csv", Body=sb.to_csv(rows))
+            else:
+                # re-run after the cause is gone: do not leave a stale file behind
+                s3.delete_object(Bucket=bucket, Key=key)
     return {
         "status": res.status,
         "reason": "; ".join(res.fail_reasons) or None,

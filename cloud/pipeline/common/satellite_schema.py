@@ -32,7 +32,6 @@ from . import grid
 # year   : whole-year composite
 
 SEASON_MONTHS = (3, 5)
-PERIOD_TYPES = ("scene", "season", "year")
 _PERIOD_RE = re.compile(
     r"^(?:scene_(?P<d>\d{4}-\d{2}-\d{2})"
     r"|season_(?P<sy>\d{4})_(?P<m0>\d{2})-(?P<m1>\d{2})"
@@ -207,7 +206,6 @@ RANGES: dict[str, tuple[float, float]] = {
     "weight": (0.0, 1.0),
 }
 SATELLITE_VALUE_COLS = ("lst_mean", "lst_p90", "ndvi_mean", "ndbi_mean", "green_ratio")
-BLDG_SOURCES = ("bma_shp", "open_buildings")
 METHODS = {"buffer_300": 300.0, "buffer_500": 500.0, "polygon": None}
 COMMUNITY_ID_RE = re.compile(r"^C\d{4}$")
 

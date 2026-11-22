@@ -58,7 +58,7 @@ variable "pandas_layer_arn" {
 variable "catalog_date_start" {
   description = "First Thai-local date the Glue tables can see (partition projection, yyyy-MM-dd). Keep it close to the first real data: a query without a date filter lists every projected partition in S3 (devices x days x 24 for raw_csv), so an early start makes it very slow."
   type        = string
-  default     = "2026-11-01"
+  default     = "2026-03-01" # first legacy data of IOTW-A001 (devices.csv valid_from)
 }
 
 variable "athena_bytes_scanned_cutoff" {

@@ -216,6 +216,17 @@ def test_out_of_range_rows_go_to_quarantine_rows(s3):
     assert "lst_c in [0, 70]" in rej
 
 
+def test_rerun_without_bad_rows_removes_stale_quarantine_rows(s3):
+    rows = pixels()
+    rows[0]["lst_c"] = 95.0
+    put_batch(s3, SCENE, rows=rows)
+    run(s3, {"batch_id": SCENE})
+    put_batch(s3, SCENE)                                   # fixed raw, same period
+    ev = run(s3, {"batch_id": SCENE, "mode": "force"})
+    assert ev["validation"]["quarantined_rows"] == 0
+    assert "Contents" not in s3.list_objects_v2(Bucket=BUCKET, Prefix=f"quarantine/rows/satellite/{SCENE}/")
+
+
 def test_cloudy_scene_is_quarantined(s3):
     put_batch(s3, SCENE, valid_ratio=0.05)
     ev = run(s3, {"batch_id": SCENE})

@@ -82,9 +82,12 @@ def active_in_hour(d, hour: datetime) -> bool:
 
 def plan(s3, bucket: str, devices, h: datetime, n: int) -> list[str]:
     """batch_ids with raw data in the lookback window, oldest hour first."""
-    candidates = [(hour, d.device_id)
-                  for hour in lookback_hours(h, n)
-                  for d in devices if active_in_hour(d, hour)]
+    # dict.fromkeys: a station that moved inside the hour has 2 registry rows
+    # active in it, but is still one batch
+    candidates = list(dict.fromkeys(
+        (hour, d.device_id)
+        for hour in lookback_hours(h, n)
+        for d in devices if active_in_hour(d, hour)))
     # one S3 listing per device per day, not per hour
     cache: dict[tuple[str, str], set[int]] = {}
     out = []

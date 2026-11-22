@@ -48,6 +48,7 @@
             "Type": "Choice",
             "Choices": [
               {"Variable": "$.check.status", "StringEquals": "ALREADY_PROCESSED", "Next": "StopAlreadyProcessed"},
+              {"Variable": "$.check.status", "StringEquals": "ALREADY_QUARANTINED", "Next": "StopAlreadyQuarantined"},
               {"Variable": "$.check.status", "StringEquals": "NO_DATA", "Next": "NoData"},
               {"Variable": "$.check.status", "StringEquals": "NEW", "Next": "ValidateBatch"},
               {"Variable": "$.check.status", "StringEquals": "CHANGED", "Next": "ValidateBatch"}
@@ -129,6 +130,7 @@
           "Published": {"Type": "Succeed"},
           "Quarantined": {"Type": "Succeed"},
           "StopAlreadyProcessed": {"Type": "Succeed"},
+          "StopAlreadyQuarantined": {"Type": "Succeed"},
           "NoData": {"Type": "Succeed"},
           "InvalidInput": {
             "Type": "Fail",

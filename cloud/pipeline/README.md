@@ -29,13 +29,14 @@ Lambda ทุกตัวอยู่ที่ `functions/<ชื่อ>/handler
 
 ```
 PlanBatches → Map (ทีละ 4 batch) → CheckBatch
-  ALREADY_PROCESSED / NO_DATA → จบ
+  ALREADY_PROCESSED / ALREADY_QUARANTINED / NO_DATA → จบ
   NEW / CHANGED → ValidateBatch
      PASS → TransformBatch → VerifyBatch → Published
-     FAIL → QuarantineBatch → Quarantined
+     FAIL → QuarantineBatch → Quarantined (ลบผลที่เคย publish ของ batch นั้นด้วย)
   error ใดๆ → NotifyFailure (SNS) → PipelineFailed
 ```
 
+- batch ที่ quarantine แล้วจะไม่ถูกตรวจซ้ำจนกว่าไฟล์ raw จะเปลี่ยน; ถ้าแก้สาเหตุอื่น (เช่น devices.csv) ให้สั่งรันด้วย `"mode": "force"`
 - `batch_eval.py` ใช้ร่วมกันโดย Validate/Transform: อ่าน raw ชุดเดียวกันแล้วตัดสินแถวเหมือนกันทุกครั้ง จึงไม่ต้องส่ง flag รายแถวผ่าน Step Functions (จำกัด 256 KB)
 - ทุกแถวดิบตกอยู่ในกลุ่มเดียว: kept / duplicate / invalid ดังนั้น `raw = trusted + duplicate + invalid` คือสิ่งที่ VerifyBatch ตรวจ
 - `curated/_success/iot/<batch_id>.json` คือเครื่องหมายว่า publish แล้ว (แทน `_SUCCESS`) เก็บ `manifest_hash` ที่ CheckBatch เห็น

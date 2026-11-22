@@ -92,7 +92,7 @@ resource "aws_lambda_function" "api" {
       ATHENA_OUTPUT    = var.athena_output
       ATHENA_TIMEOUT_S = "25"
       CACHE_TTL_S      = "60"
-      LAYER_URL_TTL_S  = "3600" # presigned GET for the layer PNGs (#34)
+      LAYER_URL_TTL_S  = "3600"                         # presigned GET for the layer PNGs (#34)
       ALLOWED_ORIGINS  = join(",", var.allowed_origins) # informational; CORS is done by API GW
     }
   }

@@ -125,6 +125,7 @@ python -m pytest -q
 | `test_current_hour_and_outside_window_excluded` | ไม่เอาชั่วโมง H (ยังเขียนอยู่) และ H-25 |
 | `test_unknown_partition_ignored` | `date=unknown` ไม่กลายเป็น batch |
 | `test_inactive_device_skipped` | เครื่องที่ `valid_to` หมดแล้วไม่ถูกนับ |
+| `test_station_moved_inside_hour_is_one_batch` | station ย้ายจุดกลางชั่วโมง (2 แถวใน registry) → batch_id เดียว ไม่ซ้ำ |
 | `test_handler_scheduled` / `test_handler_uses_real_devices_csv` | input จาก Scheduler → output ที่ Map ใช้ |
 | `test_manual_batch_ids_pass_unfiltered` | รันมือ: `batch_ids` ผ่านตามที่ส่ง (Check ตัดสินเอง) |
 
@@ -154,18 +155,23 @@ python -m pytest -q
 | `test_unknown_device_fails` / `test_device_type_mismatch_fails` | ไม่มีใน devices.csv / Device_Type ไม่ตรงทะเบียน |
 | `test_station_outside_registry_fails` | station มีแถวนอกช่วง valid_from–valid_to → `UNKNOWN_STATION_SITE` |
 | `test_time_jump_flagged_not_dropped` | เวลากระโดด → flag `TIME_JUMP` แต่ยังเก็บแถว |
+| `test_time_jump_uses_device_interval` | ตั้ง CSV interval 10 s → แถวทุก 10 s ไม่ใช่ jump แต่ช่องว่าง 2 นาทีเป็น jump |
 | `test_parse_error_row_is_invalid` | แถวแปลงไม่ได้ → invalid (ไม่ทำให้ Lambda พัง) |
-| `test_quarantine_copies_files_and_reason` | คัดลอก raw ไป `quarantine/<batch_id>/` + `reason.json` โดย raw เดิมยังอยู่ |
+| `test_quarantine_copies_files_and_reason` | คัดลอก raw ไป `quarantine/batch/iot/<batch_id>/` + `reason.json` โดย raw เดิมยังอยู่ |
+| `test_quarantined_batch_is_skipped_until_files_change` | ไฟล์ชุดเดิมที่ quarantine แล้ว → `ALREADY_QUARANTINED`; force หรือมี part ใหม่ → ตรวจใหม่ |
+| `test_published_then_failing_batch_is_unpublished` | batch ที่เคย publish แล้ว backfill ทำให้ FAIL → ลบ Parquet + marker เดิม |
 | `test_transform_tables` | readings_1s / readings_1min (mean/max/min ไม่มี Leq, cell_id null เพราะจุด fixture อยู่นอกกริด) / quality ถูกต้อง |
 | `test_one_parquet_per_table_per_hour` | raw หลาย part ในชั่วโมงเดียว → Parquet 1 ไฟล์ต่อตาราง |
 | `test_speed_filter_nulls_jump` | จุด GPS ที่เร็วเกิน 30 km/h จากจุดก่อน → lat/lon เป็น null |
+| `test_speed_filter_reanchors_after_bad_first_fix` | จุดแรกเพี้ยน → เสียพิกัดแค่ 3 จุดแล้วยึดจุดใหม่ ไม่เสียทั้งชั่วโมง |
 | `test_station_uses_registry_position` | Stationary ใช้พิกัดจาก devices.csv |
 | `test_readings_1min_populates_cell_id` | readings_1min ได้ cell_id จาก GPS จุดแรกของนาที (grid.py, #29) |
 | `test_readings_1min_station_cell_id_from_registry` | Stationary ได้ cell_id จากพิกัดใน devices.csv |
 | `test_verify_publishes_then_check_says_already_processed` | Verify เขียน manifest แล้ว CheckBatch รอบถัดไปได้ ALREADY_PROCESSED, มี part ใหม่ → CHANGED |
 | `test_verify_mismatch_raises` | จำนวนแถวไม่ตรง → `VerifyMismatch` |
 | `test_count_data_lines_matches_parser` | ตัวนับบรรทัดของ Verify ตรงกับ parser (บรรทัดว่าง/BOM) |
+| `test_stray_quote_does_not_swallow_following_lines` | บรรทัดเสียที่มี `"` ไม่กลืนบรรทัดถัดไป → Verify ไม่ล้ม, บรรทัดนั้นเป็น PARSE_ERROR |
 
 ## test_statemachine.py (#11)
 
-แทนค่า `${...}` ใน `statemachine/pipeline.asl.json` แบบเดียวกับ Terraform แล้วตรวจโครง: ทุก state ไปถึงได้, ทุก `Next` มีจริง, ทุกเส้นทางใน Map จบที่ Published / Quarantined / StopAlreadyProcessed / NoData / InvalidInput / PipelineFailed และทุก Task มี Retry + Catch
+แทนค่า `${...}` ใน `statemachine/pipeline.asl.json` แบบเดียวกับ Terraform แล้วตรวจโครง: ทุก state ไปถึงได้, ทุก `Next` มีจริง, ทุกเส้นทางใน Map จบที่ Published / Quarantined / StopAlreadyProcessed / StopAlreadyQuarantined / NoData / InvalidInput / PipelineFailed และทุก Task มี Retry + Catch

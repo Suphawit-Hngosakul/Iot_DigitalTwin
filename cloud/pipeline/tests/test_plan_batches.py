@@ -115,3 +115,11 @@ def test_manual_batch_ids_pass_unfiltered(s3):
     out = pb.handler({"batch_ids": ["IOTW-A001__2026-11-16__14", "bad"], "mode": "force"})
     assert out["batches"] == [{"batch_id": "IOTW-A001__2026-11-16__14", "mode": "force"},
                               {"batch_id": "bad", "mode": "force"}]
+
+
+def test_station_moved_inside_hour_is_one_batch(s3):
+    put(s3, "IOTW-S001", "2026-11-17", "14")
+    devices = [dev("IOTW-S001", valid_from="2026-11-01", valid_to="2026-11-17 14:30:00",
+                   device_type="Stationary"),
+               dev("IOTW-S001", valid_from="2026-11-17 14:30:00", device_type="Stationary")]
+    assert pb.plan(s3, BUCKET, devices, datetime(2026, 11, 17, 15), 2) == ["IOTW-S001__2026-11-17__14"]

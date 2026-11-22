@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import csv
 import io
+import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -125,8 +126,24 @@ def parse_file(key: str, body: bytes) -> RawFile:
     lines = [ln for ln in text.splitlines() if ln.strip()]
     if not lines:
         return RawFile(key, [], [])
-    reader = csv.DictReader(io.StringIO("\n".join(lines)))
-    return RawFile(key, list(reader.fieldnames or []), list(reader))
+    # One CSV record per physical line, the same way ingest splits the body: a
+    # stray '"' in a corrupt line must not swallow the lines after it, so the
+    # row count stays equal to count_data_lines() (what VerifyBatch checks).
+    header = _split_line(lines[0])
+    rows = []
+    for ln in lines[1:]:
+        fields = _split_line(ln)
+        r = dict(zip(header, fields))
+        for col in header[len(fields):]:
+            r[col] = None                         # short line (DictReader restval)
+        if len(fields) > len(header):
+            r[None] = fields[len(header):]        # long line (DictReader restkey)
+        rows.append(r)
+    return RawFile(key, header, rows)
+
+
+def _split_line(line: str) -> list[str]: 
+    return next(csv.reader([line]), [])
 
 
 def count_data_lines(body: bytes) -> int:
@@ -222,17 +239,27 @@ def rows_csv(ev: BatchEval, bucket: str) -> bytes | None:
 
 
 def _flag_time_jumps(rows: list[EvalRow]) -> None:
-    """TIME_JUMP: time goes back, or advances more than (Record_ID gap + 5 s)."""
+    """TIME_JUMP: time goes back, or advances more than (Record_ID gap x interval + 5 s).
+
+    The row interval is configurable on the device (CSV_INTERVAL_MS 100-60000 ms), so
+    it is estimated per session as the median seconds per Record_ID step (at least 1 s:
+    DateTime has 1 s resolution, faster rows share a second).
+    """
     by_session: dict = defaultdict(list)
     for r in rows:
         if r.row is not None and r.row["ts_local"] is not None and "DUPLICATE" not in r.flags:
             by_session[r.row["Session"]].append(r)
     for rs in by_session.values():
         rs.sort(key=lambda r: r.row["Record_ID"])
+        pairs = []
         for prev, cur in zip(rs, rs[1:]):
             dt = (cur.row["ts_local"] - prev.row["ts_local"]).total_seconds()
             step = cur.row["Record_ID"] - prev.row["Record_ID"]
-            if dt < 0 or dt > step + TIME_JUMP_SLACK_S:
+            pairs.append((cur, dt, step))
+        rates = [dt / step for _, dt, step in pairs if step > 0 and dt >= 0]
+        interval = max(1.0, statistics.median(rates)) if rates else 1.0
+        for cur, dt, step in pairs:
+            if dt < 0 or dt > step * interval + TIME_JUMP_SLACK_S:
                 cur.flags.add("TIME_JUMP")
 
 

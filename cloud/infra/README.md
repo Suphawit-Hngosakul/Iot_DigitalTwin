@@ -230,7 +230,7 @@ terraform apply -target=module.catalog -target=module.curated_merge
 - คอลัมน์ `Device_ID` ใน CSV ชื่อ `csv_device_id` ในตาราง raw (ชื่อซ้ำกับ partition `device_id` ไม่ได้) และชื่อคอลัมน์ทุกตัวเป็นตัวเล็ก
 - ใน Athena console เลือก workgroup `iot_walking` ก่อน (ผลไป `s3://<bucket>/athena-results/` ลบหลัง 7 วัน) ตัวอย่าง query อยู่ใน Saved queries และ `modules/catalog/queries/`
 - ทุก query ควรมี `WHERE device_id = ... AND date = ...` ถ้าสแกนเกิน `athena_bytes_scanned_cutoff` (default 1 GiB) Athena จะยกเลิก
-- query ที่ไม่มีเงื่อนไข `date` ทำให้ Athena list S3 ทุก partition ที่ projection สร้าง (เครื่อง × วัน × 24 ชม. สำหรับ `raw_csv`) จะช้ามากแม้ข้อมูลน้อย จึงตั้ง `catalog_date_start` ใกล้วันที่มีข้อมูลจริง (default 2026-11-01) และควรใส่ `date` ทุกครั้ง
+- query ที่ไม่มีเงื่อนไข `date` ทำให้ Athena list S3 ทุก partition ที่ projection สร้าง (เครื่อง × วัน × 24 ชม. สำหรับ `raw_csv`) จะช้ามากแม้ข้อมูลน้อย จึงตั้ง `catalog_date_start` ใกล้วันที่มีข้อมูลจริง (default 2026-03-01 = วันแรกของ log รุ่นเก่าของ IOTW-A001 ที่ import เข้ามา) และควรใส่ `date` ทุกครั้ง
 - `satellite_grid` (#31) อ่าน `trusted/satellite_grid/period_type=<scene|season>/year=<YYYY>/` ที่ WriteTrusted เขียน (1 ไฟล์ต่อ batch) partition `period_type` (string) + `year` (int, ช่วง `satellite_year_range` ใน module default `2013,2035`) ควรใส่ `WHERE period_type = ... AND year = ...` ทุกครั้ง ตัวอย่างคือ saved query `satellite-grid-per-batch`
 
 **api:**
