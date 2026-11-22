@@ -34,9 +34,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import time
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from functools import lru_cache
 
 import boto3
@@ -59,7 +58,7 @@ INTERVALS = {
     "1min": ("readings_1min", "minute_local", timedelta(days=31)),
 }
 QUALITY_MAX_RANGE = timedelta(days=31)
-MANIFEST_PREFIX = "curated/_success/iot/"
+MANIFEST_PREFIX = schema.MANIFEST_PREFIX
 SATELLITE_SUCCESS_PREFIX = "curated/_success/satellite/"
 PIXEL_LAYERS = ("lst", "ndvi", "ndbi")
 STATIC_LAYERS = ("building_density",)
@@ -271,11 +270,17 @@ def latest_batch_id(device: str, s3=None) -> str | None:
     paginator = s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=os.environ["DATA_BUCKET"], Prefix=prefix):
         for obj in page.get("Contents", []):
-            if obj["Key"].endswith(".json"):
-                last = obj["Key"]
-    if last is None:
-        return None
-    return last[len(MANIFEST_PREFIX):-len(".json")]
+            key = obj["Key"]
+            if not key.endswith(".json"):
+                continue
+            batch_id = key[len(MANIFEST_PREFIX):-len(".json")]
+            try:
+                schema.parse_batch_id(batch_id)
+            except ValueError:
+                log.warning("ignoring marker with a bad name: %s", key)
+                continue
+            last = batch_id
+    return last
 
 
 def _read_manifest(batch_id: str, s3=None) -> dict:

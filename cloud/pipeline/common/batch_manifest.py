@@ -47,3 +47,12 @@ def read_published(s3, bucket: str, batch_id: str) -> dict | None:
     except s3.exceptions.NoSuchKey:
         return None
     return json.loads(obj["Body"].read())
+
+
+def read_quarantined(s3, bucket: str, batch_id: str) -> dict | None:
+    """quarantine/batch/iot/<batch_id>/reason.json, or None if never quarantined."""
+    try:
+        obj = s3.get_object(Bucket=bucket, Key=schema.s3_prefix_quarantine(batch_id) + "reason.json")
+    except s3.exceptions.NoSuchKey:
+        return None
+    return json.loads(obj["Body"].read())

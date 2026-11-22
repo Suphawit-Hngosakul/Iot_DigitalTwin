@@ -304,6 +304,11 @@ def test_state_machine_is_wired():
     check(asl["States"], asl["StartAt"])
     inner = asl["States"]["MergePeriods"]["ItemProcessor"]["States"]
     assert "WaitingForOtherSources" in inner
+    # one failed period alerts and stops only itself, the next periods still merge
+    assert asl["States"]["MergePeriods"]["ToleratedFailurePercentage"] == 100
+    for name in ("CheckSources", "MergeCurated", "VerifyCurated"):
+        assert inner[name]["Catch"][0]["Next"] == "NotifyIterationFailure"
+    assert inner["NotifyIterationFailure"]["Next"] == "IterationFailed"
     text = json.dumps(asl)
     assert set(re.findall(r"\$\{(\w+)\}", text)) == {
         "plan_merge_arn", "check_sources_arn", "merge_curated_arn", "verify_curated_arn", "alert_topic_arn"}

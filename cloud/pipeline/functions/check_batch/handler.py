@@ -9,6 +9,8 @@ status:
   INVALID_INPUT      batch_id malformed or unknown mode
   NO_DATA            no raw file under the batch prefix
   ALREADY_PROCESSED  manifest hash equals the published one (mode != force)
+  ALREADY_QUARANTINED manifest hash equals the one QuarantineBatch saw last time
+                     (mode != force): the same files would fail again, so skip
   NEW                never published
   CHANGED            published, but files were added/replaced since (e.g. backfill),
                      or mode == force
@@ -32,6 +34,7 @@ MODES = ("normal", "force")
 INVALID_INPUT = "INVALID_INPUT"
 NO_DATA = "NO_DATA"
 ALREADY_PROCESSED = "ALREADY_PROCESSED"
+ALREADY_QUARANTINED = "ALREADY_QUARANTINED"
 NEW = "NEW"
 CHANGED = "CHANGED"
 
@@ -63,13 +66,23 @@ def check(s3, bucket: str, batch_id, mode) -> dict:
     digest = batch_manifest.manifest_hash(files)
     out = {"manifest": files, "manifest_hash": digest}
     published = batch_manifest.read_published(s3, bucket, batch_id)
+    if mode != "force":
+        if published is not None and published.get("manifest_hash") == digest:
+            return {"status": ALREADY_PROCESSED, **out}
+        if _quarantined_same(s3, bucket, batch_id, digest):
+            return {"status": ALREADY_QUARANTINED,
+                    "reason": "same raw files already failed validation (mode=force to retry)",
+                    **out}
     if published is None:
         return {"status": NEW, **out}
     if mode == "force":
         return {"status": CHANGED, "reason": "mode=force", **out}
-    if published.get("manifest_hash") == digest:
-        return {"status": ALREADY_PROCESSED, **out}
     return {"status": CHANGED, "reason": "raw files differ from published manifest", **out}
+
+
+def _quarantined_same(s3, bucket: str, batch_id: str, digest: str) -> bool:
+    q = batch_manifest.read_quarantined(s3, bucket, batch_id)
+    return q is not None and q.get("manifest_hash") == digest
 
 
 def handler(event, context=None):

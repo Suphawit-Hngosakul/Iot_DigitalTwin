@@ -259,6 +259,15 @@ def test_devices_lists_registry_and_latest_published_hour(env, athena):
     assert athena.queries == []                          # no Athena for /devices
 
 
+def test_marker_with_a_bad_name_is_ignored(env, athena):
+    publish(env, "IOTW-A001__2026-11-16__09")
+    env.put_object(Bucket=BUCKET, Key="curated/_success/iot/IOTW-A001__copy.json", Body=b"{}")
+    code, body = call("/devices")
+    assert code == 200
+    devs = {d["device_id"]: d for d in body["devices"]}
+    assert devs["IOTW-A001"]["latest_batch_id"] == "IOTW-A001__2026-11-16__09"
+
+
 def test_latest_queries_only_the_latest_published_date(env, athena):
     publish(env, "IOTW-A001__2026-11-14__08")
     publish(env, "IOTW-A001__2026-11-16__10")

@@ -22,3 +22,10 @@ sudo journalctl -u iot-dt-relay -f      # บน EC2: ตั้ง relay_ssh_cid
 ```
 
 รันในเครื่อง: `UPSTREAM_URL=https://xxxx.execute-api.us-east-1.amazonaws.com/ingest python3 relay.py`
+
+เทสต์ (ไม่ต่อเน็ต: เปิด upstream ปลอมบน localhost):
+
+```
+pip install -r cloud/relay/requirements-dev.txt
+python -m pytest -q cloud/relay/tests
+```

@@ -178,7 +178,7 @@ def cmd_upload(a) -> None:
                 print(f"[dry-run] {p.name} {chunk_id} {len(chunk)} rows {len(buf.getvalue())} B"); continue
             for attempt in range(4):
                 status, text = post(a.url, a.token, device, chunk_id, buf.getvalue().encode(), a.timeout)
-                if status < 500:
+                if status < 500 and status != 429:      # 429 = API Gateway throttle: retry
                     break
                 time.sleep(2 ** attempt)
             ok = 200 <= status < 300

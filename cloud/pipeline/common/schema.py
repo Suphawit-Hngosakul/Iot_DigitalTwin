@@ -2,7 +2,7 @@
 
 Single source of truth for the CSV the device writes to SD / uploads, the
 value ranges, the quality flags, the Parquet tables the pipeline publishes,
-the S3 key layout and the device registry. Ingest, pipeline, simulator and
+the S3 key layout and the device registry. Ingest, pipeline and the
 API import from here; nobody re-types a column list.
 
 The CSV layout mirrors iot/firmware/main/sd_logger.cpp (createCSVLog /
@@ -85,7 +85,6 @@ PIPELINE_FLAGS = frozenset({
     "BAD_DEVICE_TYPE",
     "UNKNOWN_FLAG",       # Flags holds a code not in DEVICE_FLAGS
 })
-ALL_FLAGS = DEVICE_FLAGS | PIPELINE_FLAGS
 # Rows carrying any of these are removed by TransformBatch (and counted in quality).
 DROP_FLAGS = frozenset({
     "NO_RTC", "OUT_OF_BATCH_HOUR", "DUPLICATE", "PARSE_ERROR",

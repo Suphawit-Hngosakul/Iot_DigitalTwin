@@ -59,13 +59,14 @@ def test_top_level():
 def test_map_iteration_ends():
     states = check_scope(render()["States"]["Batches"]["ItemProcessor"])
     ends = {n for n, s in states.items() if s["Type"] in ("Succeed", "Fail")}
-    assert ends == {"Published", "Quarantined", "StopAlreadyProcessed", "NoData",
-                    "InvalidInput", "PipelineFailed"}
+    assert ends == {"Published", "Quarantined", "StopAlreadyProcessed", "StopAlreadyQuarantined",
+                    "NoData", "InvalidInput", "PipelineFailed"}
     for name in ("CheckBatch", "ValidateBatch", "QuarantineBatch", "TransformBatch", "VerifyBatch"):
         st = states[name]
         assert st["Retry"][0]["MaxAttempts"] == 2
         assert st["Catch"][0]["Next"] == "NotifyFailure"
     choices = {c["StringEquals"]: c["Next"] for c in states["AlreadyProcessed?"]["Choices"]}
-    assert choices == {"ALREADY_PROCESSED": "StopAlreadyProcessed", "NO_DATA": "NoData",
+    assert choices == {"ALREADY_PROCESSED": "StopAlreadyProcessed",
+                       "ALREADY_QUARANTINED": "StopAlreadyQuarantined", "NO_DATA": "NoData",
                        "NEW": "ValidateBatch", "CHANGED": "ValidateBatch"}
     assert states["AlreadyProcessed?"]["Default"] == "InvalidInput"
