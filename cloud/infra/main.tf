@@ -25,6 +25,8 @@ module "storage" {
   region      = var.region
   # S3 -> EventBridge for the satellite pipeline trigger (spec 51 §2)
   eventbridge_enabled = var.satellite_pipeline_enabled
+  # web reads layer PNGs via presigned GET (#34) -> same origins as the API
+  cors_allowed_origins = var.api_allowed_origins
 }
 
 module "ingest" {
