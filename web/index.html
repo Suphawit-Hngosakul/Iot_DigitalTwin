@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IoT Walking · Urban Heat Digital Twin</title>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <strong>Urban Heat Digital Twin</strong>
+      <span id="mode-badge" class="badge">MOCK DATA</span>
+    </div>
+    <nav id="tabs">
+      <button data-tab="map" class="active">1. แผนที่ชุมชน &amp; อาคาร 3D</button>
+      <button data-tab="stats">2. วิเคราะห์ปัจจัยความร้อน</button>
+      <button data-tab="research">3. คำนวณ &amp; เทียบงานวิจัย</button>
+      <button data-tab="iot">4. ข้อมูลสด IoT &amp; เสียง</button>
+      <button data-tab="flow">API Debug</button>
+    </nav>
+    <div class="globals">
+      <label>ช่วงเวลา <select id="period"></select></label>
+      <label>โหมดเวลา
+        <select id="match">
+          <option value="all">ทุกเวลา (all)</option>
+          <option value="window">ช่วงแดดจัด 09:30–11:30</option>
+        </select>
+      </label>
+      <button id="cfg-toggle" class="ghost">API จริง ⚙</button>
+      <button id="log-toggle" class="ghost">Log ▸</button>
+    </div>
+    <div id="cfg-bar" class="cfg hidden">
+      <label>api_url <input id="cfg-api" placeholder="https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com" /></label>
+      <label>hub_live_url <input id="cfg-live" placeholder="ws://&lt;eip&gt;:8081/live" /></label>
+      <button id="cfg-save">ใช้ข้อมูลจริง</button>
+      <button id="cfg-mock" class="ghost">กลับไปใช้ mock</button>
+      <small>ค่าจาก <code>terraform output -raw api_url</code> และ <code>hub_live_url</code></small>
+    </div>
+  </header>
+
+  <main>
+    <!-- ① แผนที่ชุมชน & อาคาร 3D -->
+    <section id="tab-map" class="tab active">
+      <aside class="panel" id="map-panel">
+        <div class="group">
+          <h3>แผนที่พื้นหลัง</h3>
+          <select id="basemap">
+            <option value="osm">แผนที่ถนน (OpenStreetMap)</option>
+            <option value="imagery">ภาพถ่ายดาวเทียม (Esri)</option>
+          </select>
+        </div>
+
+        <div class="group highlight-group">
+          <h3>อาคารรายหลัง 3D (building.shp)</h3>
+          <div class="row2">
+            <label class="row"><input type="checkbox" id="bldg-on" checked /> แสดงตัวอาคาร</label>
+            <button id="bldg-tilt" class="mini-btn">เอียงมุมมอง 3D</button>
+          </div>
+          <div class="legend">
+            <span class="sw" style="background:#fde68a"></span>1–2 ชั้น
+            <span class="sw" style="background:#f97316"></span>3–5 ชั้น
+            <span class="sw" style="background:#b91c1c"></span>6+ ชั้น
+          </div>
+          <p class="note" id="bldg-note">กำลังโหลดขอบเขตอาคาร…</p>
+          <p class="note">คลิกที่ตัวอาคารเพื่อดูความสูงและค่าความร้อนรอบอาคาร</p>
+        </div>
+
+        <div class="group">
+          <h3>อุณหภูมิพื้นผิว &amp; สิ่งปกคลุมดิน (30 m) <button class="src" data-ep="/layers">JSON</button></h3>
+          <p class="note" id="layer-note"></p>
+          <div id="layer-controls"></div>
+        </div>
+
+        <div class="group">
+          <h3>เส้นทางเดินวัดอากาศจริง (IoT) <button class="src" data-ep="/readings">JSON</button></h3>
+          <label class="row"><input type="checkbox" id="track-on" checked /> แสดงเส้นทางเดิน</label>
+          <div class="row2">
+            <select id="track-dev"></select>
+            <input type="date" id="track-date" value="2026-11-21" />
+          </div>
+          <label>ระบายสีตาม
+            <select id="track-color">
+              <option value="temp_c_mean">อุณหภูมิอากาศจริง (°C)</option>
+              <option value="db_spl_mean">ระดับเสียง dB(SPL)</option>
+              <option value="dba_mean">ระดับเสียง dBA</option>
+            </select>
+          </label>
+          <div class="legend" id="track-legend"></div>
+          <p class="note" id="track-info"></p>
+        </div>
+
+        <div class="group">
+          <h3>กริดวิเคราะห์รวมข้อมูล (90 m) <button class="src" data-ep="/grid">JSON</button></h3>
+          <label class="row"><input type="checkbox" id="grid-on" /> เปิดตารางกริด 90 m</label>
+          <select id="grid-var">
+            <option value="lst_mean">อุณหภูมิพื้นผิว LST (°C)</option>
+            <option value="air_temp_mean">อุณหภูมิอากาศ IoT (°C)</option>
+            <option value="ndvi_mean">ดัชนีพืชพรรณ NDVI</option>
+            <option value="builtup_pct">ความหนาแน่นอาคาร (%)</option>
+            <option value="ndbi_mean">ดัชนีสิ่งปลูกสร้าง NDBI</option>
+            <option value="db_spl_mean">ระดับเสียงเฉลี่ย (dB)</option>
+          </select>
+          <div class="legend" id="grid-legend"></div>
+          <p class="note" id="grid-note"></p>
+        </div>
+
+        <div class="group">
+          <h3>จุดร้อนวิกฤตชุมชน (Hot Spot Gi*) <button class="src" data-ep="/analytics/hotspot">JSON</button></h3>
+          <p class="note" id="hot-note"></p>
+          <label class="row"><input type="checkbox" id="hot-on" /> ไฮไลต์โซนร้อนจัด / เย็นจัด</label>
+          <div class="legend">
+            <span class="sw" style="background:#b2182b"></span>ร้อนจัด 99%
+            <span class="sw" style="background:#ef8a62"></span>ร้อน 95%
+            <span class="sw" style="background:#67a9cf"></span>เย็น 95%
+            <span class="sw" style="background:#2166ac"></span>เย็นจัด 99%
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>สถานีตรวจวัด &amp; ค่าสด <button class="src" data-ep="ws">ws</button></h3>
+          <label class="row"><input type="checkbox" id="live-on" checked /> แสดงตำแหน่งสด</label>
+          <div id="live-mini"></div>
+          <p class="note" id="live-note"></p>
+        </div>
+      </aside>
+      <div id="map"></div>
+    </section>
+
+    <!-- ② วิเคราะห์ปัจจัยความร้อน -->
+    <section id="tab-stats" class="tab">
+      <div id="stats-banner" class="banner hidden">
+        ผลสถิติในแท็บนี้ใช้ <b>mock</b> อัตโนมัติหาก API จริงยังไม่เปิด <code>/analytics/*</code> ส่วน Scatter ใช้ <code>/grid</code> จาก API จริง
+      </div>
+      <div class="stats-head">
+        <div id="headline" class="headline">กำลังวิเคราะห์ความร้อนในชุมชน…</div>
+        <button class="src" data-ep="/analytics/summary">JSON</button>
+      </div>
+
+      <!-- กล่องสรุปภาษาคน -->
+      <div id="research-takeaways" class="takeaway-grid"></div>
+
+      <div id="s1-cards" class="cards"></div>
+      <div class="grid2">
+        <div class="card">
+          <h3>1. โซนเขียว vs โซนอาคารหนาแน่น ร้อนต่างกันกี่องศา? (S8)</h3>
+          <div class="chart" id="c-groups"></div>
+        </div>
+        <div class="card">
+          <h3>2. กราฟความสัมพันธ์รายบล็อก 90 m (Scatter + เส้นแนวโน้ม)
+            <select id="sc-x">
+              <option value="ndvi_mean">อุณหภูมิพื้นผิว (LST) vs พื้นที่สีเขียว (NDVI)</option>
+              <option value="builtup_pct">อุณหภูมิพื้นผิว (LST) vs ความหนาแน่นอาคาร (%)</option>
+              <option value="ndbi_mean">อุณหภูมิพื้นผิว (LST) vs สิ่งปลูกสร้าง (NDBI)</option>
+              <option value="air">อุณหภูมิอากาศคนเดินเท้า (IoT) vs พื้นผิว (LST)</option>
+            </select>
+          </h3>
+          <div class="chart" id="c-scatter"></div>
+        </div>
+        <div class="card">
+          <h3>3. ปัจจัยไหนมีอิทธิพลต่อความร้อนมากที่สุด? (Regression vs Random Forest)</h3>
+          <div class="chart" id="c-coef"></div>
+          <p class="note" id="s3-note"></p>
+        </div>
+        <div class="card">
+          <h3>4. เมทริกซ์สหสัมพันธ์ระหว่างตัวแปรทั้งหมด (Pearson r)</h3>
+          <div class="chart" id="c-corr"></div>
+        </div>
+        <div class="card">
+          <h3>5. การเปลี่ยนแปลงอุณหภูมิอากาศตลอด 24 ชม. (สถานีในสวน vs ริมถนน)</h3>
+          <div class="chart" id="c-s9"></div>
+        </div>
+        <div class="card">
+          <h3>6. การกระจุกตัวเชิงพื้นที่ (Spatial Autocorrelation · Moran's I)</h3>
+          <div id="s7" class="kv"></div>
+          <p class="note">ค่า Moran's I เข้าใกล้ +1 แปลว่าความร้อนกระจุกตัวเป็นกลุ่มก้อนตามลักษณะผังเมือง ไม่ได้กระจายแบบสุ่ม</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ③ คำนวณ & เทียบงานวิจัย (หน้าใหม่ที่ตอบโจทย์งานวิจัยโดยตรง) -->
+    <section id="tab-research" class="tab">
+      <div class="res-wrap">
+        <div class="res-hero">
+          <h2>ระบบนี้อธิบาย "ความร้อนในชุมชน" และตอบโจทย์งานวิจัยอย่างไร?</h2>
+          <p>เชื่อมโยงข้อมูล 3 มิติ ได้แก่ <b>สัณฐานอาคารจาก <code>building.shp</code></b> + <b>ภาพถ่ายดาวเทียม Landsat 8/9 (30 m)</b> + <b>การเดินวัดอากาศจริงระดับคนเดินเท้าด้วย IoT (1 Hz)</b> ลงบนกริดมาตรฐานขนาด <b>90 × 90 เมตร</b> เพื่อแยกแยะว่าความร้อนในชุมชนเกิดจาก "ความหนาแน่นอาคาร" หรือ "การขาดพื้นที่สีเขียว" มากน้อยเพียงใด</p>
+        </div>
+
+        <div class="pipeline-cards">
+          <div class="p-card">
+            <span class="step-num">ขั้นที่ 1 · ข้อมูลตั้งต้น 3 แหล่ง</span>
+            <h4>Physical + Satellite + Human-level IoT</h4>
+            <ul>
+              <li><b>building.shp (BMA / Open Buildings):</b> คำนวณสัดส่วนพื้นที่อาคาร (<code>builtup_pct</code>), จำนวนหลัง, จำนวนชั้นเฉลี่ย และ <code>FAR</code></li>
+              <li><b>Landsat 8/9 (30 m):</b> คำนวณอุณหภูมิพื้นผิว (<code>LST</code>), พืชพรรณ (<code>NDVI</code>) และสิ่งปลูกสร้าง (<code>NDBI</code>)</li>
+              <li><b>IoT Walking &amp; Stationary (1 Hz):</b> วัดอุณหภูมิอากาศจริง (<code>temp_c</code>), ความชื้น, แสง และเสียงระดับทางเดินเท้า</li>
+            </ul>
+          </div>
+          <div class="p-card">
+            <span class="step-num">ขั้นที่ 2 · การรวมข้อมูลเชิงพื้นที่</span>
+            <h4>90 m Spatial Grid Aggregation</h4>
+            <ul>
+              <li>กำหนดขนาดกริด <b>90 × 90 ม.</b> (3×3 พิกเซล Landsat) เพื่อลดความคลาดเคลื่อนของพิกัด GPS ขณะเดิน</li>
+              <li>คำนวณค่าเฉลี่ยถ่วงน้ำหนักพื้นที่สำหรับ <code>building.shp</code> และค่าเฉลี่ยดาวเทียมในแต่ละเซลล์</li>
+              <li>จับคู่ข้อมูล IoT แบบ <b>Window (09:30–11:30 น.)</b> เพื่อให้ตรงเวลาที่ดาวเทียมโคจรผ่านพื้นที่ศึกษา</li>
+            </ul>
+          </div>
+          <div class="p-card">
+            <span class="step-num">ขั้นที่ 3 · แบบจำลองอธิบายความร้อน</span>
+            <h4>Statistical &amp; Spatial Modeling</h4>
+            <ul>
+              <li><b>Multiple Regression (S3/S4):</b> หาค่าสัมประสิทธิ์มาตรฐาน ($\beta^*$) เพื่อเทียบน้ำหนักของ NDVI vs อาคาร</li>
+              <li><b>Random Forest Importance (S5):</b> จับความสัมพันธ์แบบไม่เป็นเส้นตรง (Non-linear) ของสัณฐานเมือง</li>
+              <li><b>Getis-Ord $G_i^*$ &amp; Moran's $I$:</b> ระบุพิกัดกลุ่มอาคารที่เป็น "เกาะความร้อนวิกฤต" อย่างมีนัยสำคัญทางสถิติ</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="card res-section">
+          <h3>ตารางเปรียบเทียบผลลัพธ์จากข้อมูลของเรา (<span id="res-period-label">กำลังโหลด…</span>) เทียบกับงานวิจัย UHI</h3>
+          <p class="note">ค่าในคอลัมน์ <b>"ผลที่คำนวณได้จากระบบเรา"</b> อัปเดตอัตโนมัติตามช่วงเวลาที่เลือกด้านบน เพื่อใช้เขียนอภิปรายผล (Discussion) เทียบกับงานวิจัยด้านเกาะความร้อนเมือง (Urban Heat Island)</p>
+          <div class="table-scroll">
+            <table class="res-table">
+              <thead>
+                <tr>
+                  <th>ประเด็นการอธิบายความร้อน</th>
+                  <th>วิธีคำนวณ / ตัวชี้วัด</th>
+                  <th>ผลที่คำนวณได้จากระบบเรา</th>
+                  <th>เกณฑ์อ้างอิงจากงานวิจัย UHI</th>
+                  <th>การตีความผลสำหรับชุมชน</th>
+                </tr>
+              </thead>
+              <tbody id="res-comparison-body"></tbody>
+            </table>
+          </div>
+          <div id="res-interpretation" class="interp-box"></div>
+        </div>
+
+        <div class="card res-section">
+          <h3>สรุปสูตรและวิธีการคำนวณทางวิชาการ (Calculation Reference)</h3>
+          <div class="table-scroll">
+            <table class="res-table">
+              <thead>
+                <tr>
+                  <th>โมดูล / สมการ</th>
+                  <th>สูตร / อัลกอริทึม</th>
+                  <th>ความหมายในการอธิบายความร้อนชุมชน</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><b>ความหนาแน่นอาคาร (building.shp)</b></td>
+                  <td><code>builtup_pct = (Σ Area_bldg / 8100 m²) × 100</code><br><code>FAR = Σ (Area_bldg × Floors) / 8100 m²</code></td>
+                  <td>สะท้อนมวลความร้อน (Thermal Mass) และการบังลม (Wind Blocking) ของกลุ่มอาคารในบล็อก 90×90 ม.</td>
+                </tr>
+                <tr>
+                  <td><b>ดัชนีพืชพรรณ &amp; สิ่งปลูกสร้าง</b></td>
+                  <td><code>NDVI = (NIR - Red) / (NIR + Red)</code><br><code>NDBI = (SWIR - NIR) / (SWIR + NIR)</code></td>
+                  <td>วัดความสามารถในการคายระเหยน้ำลดความร้อน (Evapotranspiration) เทียบกับพื้นผิวคอนกรีต/หลังคา</td>
+                </tr>
+                <tr>
+                  <td><b>แบบจำลองอธิบาย LST (S3)</b></td>
+                  <td><code>LST = β₀ + β₁(NDVI) + β₂(NDBI) + β₃(builtup_pct) + ε</code><br>เปรียบเทียบค่ามาตรฐาน <code>β* = β · (SD_x / SD_y)</code></td>
+                  <td>บอกได้ว่าหากเพิ่มพื้นที่สีเขียว 1 SD หรือลดความหนาแน่นอาคาร 1 SD จะลดอุณหภูมิพื้นผิวได้กี่ส่วนเบี่ยงเบนมาตรฐาน</td>
+                </tr>
+                <tr>
+                  <td><b>แบบจำลองอุณหภูมิอากาศจริง (S4)</b></td>
+                  <td><code>AirTemp_IoT = β₀ + β₁(LST) + β₂(NDVI) + β₃(builtup_pct) + ε</code></td>
+                  <td>เชื่อมความร้อนจากภาพถ่ายดาวเทียมลงสู่ระดับความสูง 1.5 ม. ที่คนเดินเท้าในชุมชนรู้สึกจริง (Microclimate Coupling)</td>
+                </tr>
+                <tr>
+                  <td><b>ดัชนีจุดร้อนชุมชน (Getis-Ord Gᵢ*)</b></td>
+                  <td><code>Gᵢ* = [Σ wᵢⱼxⱼ - X̄ Σ wᵢⱼ] / [S · √((n Σ wᵢⱼ² - (Σ wᵢⱼ)²)/(n-1))]</code><br>รัศมีเพื่อนบ้าน <code>d = 300 m</code></td>
+                  <td>คัดกรองเฉพาะกลุ่มอาคารที่ร้อนสูงต่อเนื่องเป็นบริเวณกว้าง (Hot Spot 95%/99%) ไม่ใช่จุดร้อนโดดเดี่ยว</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ④ IoT -->
+    <section id="tab-iot" class="tab">
+      <div class="iot-head">
+        <label>เครื่อง <select id="iot-dev"></select></label>
+        <label>วันที่ <input type="date" id="iot-date" value="2026-11-21" /></label>
+        <label class="row"><input type="checkbox" id="iot-dba" /> ซ้อนเส้น dBA</label>
+        <button class="src" data-ep="/readings">GET /readings</button>
+        <button class="src" data-ep="/quality">GET /quality</button>
+      </div>
+      <div class="grid-iot">
+        <div class="card span2">
+          <h3>เสียง dB(SPL) รายนาที <small>(mean, แถบ = min–max)</small></h3>
+          <div class="chart" id="c-spl"></div>
+        </div>
+        <div class="card live-card">
+          <h3>ค่าสด realtime <button class="src" data-ep="ws">ws /live</button></h3>
+          <div id="live-big"></div>
+          <div class="audio">
+            <button id="listen">▶ ฟังเสียงสด</button>
+            <span id="audio-status" class="note">ส่ง <code>{"t":"listen"}</code> → hub ส่ง <code>audio_on</code></span>
+            <div id="audio-stats" class="kv small"></div>
+            <p class="note">โหมดจริงถอดรหัส IMA-ADPCM 16 kHz · โหมด mock จำลองระดับเสียงตาม dB(SPL)</p>
+          </div>
+        </div>
+        <div class="card"><h3>อุณหภูมิอากาศ °C</h3><div class="chart sm" id="c-temp"></div></div>
+        <div class="card"><h3>ความชื้นสัมพัทธ์ %</h3><div class="chart sm" id="c-hum"></div></div>
+        <div class="card"><h3>ความเข้มแสง lux</h3><div class="chart sm" id="c-lux"></div></div>
+        <div class="card span3">
+          <h3>คุณภาพข้อมูลรายชั่วโมง (loss_rate = missing / expected) <button class="src" data-ep="/quality">/quality</button></h3>
+          <div class="chart sm" id="c-quality"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ⑤ API Debug -->
+    <section id="tab-flow" class="tab">
+      <div class="flow-wrap">
+        <h2>API Inspector (สำหรับตรวจสอบ JSON ดิบจาก Backend)</h2>
+        <div class="try">
+          <input id="try-url" value="/readings?device=IOTW-A001&from=2026-11-21T08:00:00&to=2026-11-21T09:00:00&interval=1min" />
+          <button id="try-go">GET</button>
+          <span class="hint">ลอง:
+            <a href="#" data-try="/devices">/devices</a> ·
+            <a href="#" data-try="/latest?device=IOTW-S001">/latest</a> ·
+            <a href="#" data-try="/layers">/layers</a> ·
+            <a href="#" data-try="/grid/c0010_r0015">/grid/c0010_r0015</a> ·
+            <a href="#" data-try="/analytics/correlation">/analytics/correlation</a>
+          </span>
+        </div>
+        <pre id="try-out" class="json"></pre>
+      </div>
+    </section>
+  </main>
+
+  <aside id="log" class="log">
+    <div class="log-head"><strong>API log</strong> <small>คลิกเพื่อดู JSON</small> <button id="log-close" class="ghost">✕</button></div>
+    <ul id="log-list"></ul>
+  </aside>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-head"><code id="modal-title"></code><button id="modal-close" class="ghost">✕</button></div>
+      <p class="note" id="modal-note"></p>
+      <pre id="modal-json" class="json"></pre>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
