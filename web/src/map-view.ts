@@ -106,6 +106,16 @@ export class MapController {
       this.map.setLayoutProperty("imagery", "visibility", val === "imagery" ? "visible" : "none");
     };
 
+    const commCb = document.getElementById("comm-on") as HTMLInputElement | null;
+    if (commCb) {
+      commCb.onchange = (e) => {
+        const vis = (e.target as HTMLInputElement).checked ? "visible" : "none";
+        ["comm-fill", "comm-outline"]
+          .filter((l) => this.map.getLayer(l))
+          .forEach((l) => this.map.setLayoutProperty(l, "visibility", vis));
+      };
+    }
+
     (document.getElementById("bldg-on") as HTMLInputElement).onchange = (e) => {
       const vis = (e.target as HTMLInputElement).checked ? "visible" : "none";
       ["bldg-3d", "bldg-outline"].filter((l) => this.map.getLayer(l)).forEach((l) => this.map.setLayoutProperty(l, "visibility", vis));
@@ -156,10 +166,23 @@ export class MapController {
     this.map.on("mouseenter", "bldg-3d", () => (this.map.getCanvas().style.cursor = "pointer"));
     this.map.on("mouseleave", "bldg-3d", () => (this.map.getCanvas().style.cursor = ""));
 
+    this.map.on("click", "comm-fill", (e) => {
+      const bldgHits = this.map.queryRenderedFeatures(e.point, {
+        layers: this.map.getLayer("bldg-3d") ? ["bldg-3d"] : [],
+      });
+      if (bldgHits.length > 0) return;
+      const props = e.features?.[0]?.properties || {};
+      this.communityPopup(props, e.lngLat);
+    });
+    this.map.on("mouseenter", "comm-fill", () => (this.map.getCanvas().style.cursor = "pointer"));
+    this.map.on("mouseleave", "comm-fill", () => (this.map.getCanvas().style.cursor = ""));
+
     this.map.on("click", "grid-hit", (e) => {
-      // ถ้าคลิกโดนอาคาร ให้ buildingPopup ทำงานแทน
+      // ถ้าคลิกโดนอาคารหรือขอบเขตชุมชน ให้ Popup ของชั้นนั้นทำงานแทน
       const bldgHits = this.map.queryRenderedFeatures(e.point, { layers: this.map.getLayer("bldg-3d") ? ["bldg-3d"] : [] });
       if (bldgHits.length > 0) return;
+      const commHits = this.map.queryRenderedFeatures(e.point, { layers: this.map.getLayer("comm-fill") ? ["comm-fill"] : [] });
+      if (commHits.length > 0) return;
       const cellId = e.features?.[0]?.properties?.cell_id;
       if (cellId) this.cellPopup(String(cellId), e.lngLat);
     });
@@ -169,6 +192,7 @@ export class MapController {
     this.map.on("load", async () => {
       await this.loadLayers();
       await this.loadGrid();
+      await this.loadCommunities();
       await this.loadBuildings();
       await this.loadHotspot();
       await this.loadDevicesOnMap();
@@ -181,6 +205,77 @@ export class MapController {
     await this.loadLayers();
     await this.loadGrid();
     await this.loadHotspot();
+  }
+
+  async loadCommunities() {
+    const note = document.getElementById("comm-note");
+    const data = await api<GeoJSON.FeatureCollection>("/community").catch(() => null);
+    if (!data?.features?.length) {
+      if (note) note.textContent = "ยังไม่มีข้อมูลชุมชนใน API (ใช้โหมดจริงเพื่อแสดงผล)";
+      return;
+    }
+    if (note) {
+      note.innerHTML = `โหลด <b>${data.features.length} ชุมชน</b> (เขตดอนเมือง–หลักสี่) · คลิกที่วงชุมชนเพื่อเทียบค่า 300/500 ม.`;
+    }
+
+    const existing = this.map.getSource("communities") as maplibregl.GeoJSONSource | undefined;
+    if (existing) {
+      existing.setData(data);
+      return;
+    }
+
+    const visible = (document.getElementById("comm-on") as HTMLInputElement | null)?.checked !== false ? "visible" : "none";
+    this.map.addSource("communities", { type: "geojson", data });
+    const colorExpr = [
+      "match",
+      ["get", "risk_level"],
+      "high", "#ef4444",
+      "medium", "#f59e0b",
+      "low", "#10b981",
+      "#6366f1",
+    ] as unknown as maplibregl.ExpressionSpecification;
+
+    this.map.addLayer({
+      id: "comm-fill",
+      type: "fill",
+      source: "communities",
+      layout: { visibility: visible },
+      paint: { "fill-color": colorExpr, "fill-opacity": 0.32 },
+    });
+    this.map.addLayer({
+      id: "comm-outline",
+      type: "line",
+      source: "communities",
+      layout: { visibility: visible },
+      paint: { "line-color": colorExpr, "line-width": 2 },
+    });
+  }
+
+  private communityPopup(props: Record<string, unknown>, lngLat: maplibregl.LngLat) {
+    const riskMap: Record<string, string> = {
+      high: "เสี่ยงสูง (เขียวน้อย · อาคารหนาแน่น)",
+      medium: "เสี่ยงปานกลาง",
+      low: "เสี่ยงต่ำ (พื้นที่สีเขียวสูง)",
+    };
+    const riskText = riskMap[String(props.risk_level || "")] || String(props.risk_level || "—");
+    const pct = (v: unknown) => (v != null && v !== "" ? `${fmt(Number(v) * 100, 1)} %` : "—");
+
+    new maplibregl.Popup({ maxWidth: "380px" })
+      .setLngLat(lngLat)
+      .setHTML(`<div class="pop">
+        <b>${esc(props.name || props.community_id || "ชุมชน")}</b> (${esc(props.community_id || "")})<br>
+        <small>เขต${esc(props.district || "—")} · ระดับความเปราะบาง: <b>${esc(riskText)}</b></small>
+        <table>
+          <tr><th>ตัวชี้วัด (ปี 2026)</th><th>รัศมี 300 ม.</th><th>รัศมี 500 ม.</th></tr>
+          <tr><td>อุณหภูมิพื้นผิวเฉลี่ย (LST)</td><td><b>${fmt(props.lst_mean_300, 2)} °C</b></td><td>${fmt(props.lst_mean_500, 2)} °C</td></tr>
+          <tr><td>อุณหภูมิสูงสุด 90th (LST p90)</td><td>${fmt(props.lst_p90_300, 2)} °C</td><td>${fmt(props.lst_p90_500, 2)} °C</td></tr>
+          <tr><td>ดัชนีพืชพรรณ (NDVI)</td><td>${fmt(props.ndvi_mean_300, 3)}</td><td>${fmt(props.ndvi_mean_500, 3)}</td></tr>
+          <tr><td>สัดส่วนพื้นที่สีเขียว</td><td>${pct(props.green_ratio_300)}</td><td>${pct(props.green_ratio_500)}</td></tr>
+          <tr><td>ความหนาแน่นอาคาร</td><td><b>${fmt(props.builtup_pct_300, 1)} %</b></td><td>${fmt(props.builtup_pct_500, 1)} %</td></tr>
+          <tr><td>จำนวนอาคารโดยรอบ</td><td>${fmt(props.building_count_300, 0)} หลัง</td><td>${fmt(props.building_count_500, 0)} หลัง</td></tr>
+        </table>
+      </div>`)
+      .addTo(this.map);
   }
 
   async loadBuildings() {
@@ -313,7 +408,13 @@ export class MapController {
     }
 
     const box = document.getElementById("layer-controls")!;
-    const beforeId = this.map.getLayer("grid-fill") ? "grid-fill" : this.map.getLayer("bldg-3d") ? "bldg-3d" : undefined;
+    const beforeId = this.map.getLayer("grid-fill")
+      ? "grid-fill"
+      : this.map.getLayer("comm-fill")
+        ? "comm-fill"
+        : this.map.getLayer("bldg-3d")
+          ? "bldg-3d"
+          : undefined;
 
     for (const L of all) {
       const id = "img-" + L.layer;

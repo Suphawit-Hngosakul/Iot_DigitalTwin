@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="th">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>IoT Walking · Urban Heat Digital Twin</title>
 </head>
+
 <body>
   <header>
     <div class="brand">
@@ -48,6 +50,17 @@
             <option value="osm">แผนที่ถนน (OpenStreetMap)</option>
             <option value="imagery">ภาพถ่ายดาวเทียม (Esri)</option>
           </select>
+        </div>
+
+        <div class="group highlight-group">
+          <h3>ชุมชนเปราะบาง 36 แห่ง (CS341) <button class="src" data-ep="/community">JSON</button></h3>
+          <label class="row"><input type="checkbox" id="comm-on" checked /> แสดงขอบเขตชุมชน (รัศมี 150 ม.)</label>
+          <div class="legend">
+            <span class="sw" style="background:#ef4444"></span>เสี่ยงสูง (เขียวน้อย·ตึกแน่น)
+            <span class="sw" style="background:#f59e0b"></span>ปานกลาง
+            <span class="sw" style="background:#10b981"></span>เสี่ยงต่ำ
+          </div>
+          <p class="note" id="comm-note">กำลังโหลดข้อมูลชุมชน…</p>
         </div>
 
         <div class="group highlight-group">
@@ -129,7 +142,8 @@
     <!-- ② วิเคราะห์ปัจจัยความร้อน -->
     <section id="tab-stats" class="tab">
       <div id="stats-banner" class="banner hidden">
-        ผลสถิติในแท็บนี้ใช้ <b>mock</b> อัตโนมัติหาก API จริงยังไม่เปิด <code>/analytics/*</code> ส่วน Scatter ใช้ <code>/grid</code> จาก API จริง
+        ผลสถิติในแท็บนี้ใช้ <b>mock</b> อัตโนมัติหาก API จริงยังไม่เปิด <code>/analytics/*</code> ส่วน Scatter ใช้
+        <code>/grid</code> จาก API จริง
       </div>
       <div class="stats-head">
         <div id="headline" class="headline">กำลังวิเคราะห์ความร้อนในชุมชน…</div>
@@ -172,7 +186,8 @@
         <div class="card">
           <h3>6. การกระจุกตัวเชิงพื้นที่ (Spatial Autocorrelation · Moran's I)</h3>
           <div id="s7" class="kv"></div>
-          <p class="note">ค่า Moran's I เข้าใกล้ +1 แปลว่าความร้อนกระจุกตัวเป็นกลุ่มก้อนตามลักษณะผังเมือง ไม่ได้กระจายแบบสุ่ม</p>
+          <p class="note">ค่า Moran's I เข้าใกล้ +1 แปลว่าความร้อนกระจุกตัวเป็นกลุ่มก้อนตามลักษณะผังเมือง
+            ไม่ได้กระจายแบบสุ่ม</p>
         </div>
       </div>
     </section>
@@ -182,7 +197,10 @@
       <div class="res-wrap">
         <div class="res-hero">
           <h2>ระบบนี้อธิบาย "ความร้อนในชุมชน" และตอบโจทย์งานวิจัยอย่างไร?</h2>
-          <p>เชื่อมโยงข้อมูล 3 มิติ ได้แก่ <b>สัณฐานอาคารจาก <code>building.shp</code></b> + <b>ภาพถ่ายดาวเทียม Landsat 8/9 (30 m)</b> + <b>การเดินวัดอากาศจริงระดับคนเดินเท้าด้วย IoT (1 Hz)</b> ลงบนกริดมาตรฐานขนาด <b>90 × 90 เมตร</b> เพื่อแยกแยะว่าความร้อนในชุมชนเกิดจาก "ความหนาแน่นอาคาร" หรือ "การขาดพื้นที่สีเขียว" มากน้อยเพียงใด</p>
+          <p>เชื่อมโยงข้อมูล 3 มิติ ได้แก่ <b>สัณฐานอาคารจาก <code>building.shp</code></b> + <b>ภาพถ่ายดาวเทียม Landsat
+              8/9 (30 m)</b> + <b>การเดินวัดอากาศจริงระดับคนเดินเท้าด้วย IoT (1 Hz)</b> ลงบนกริดมาตรฐานขนาด <b>90 × 90
+              เมตร</b> เพื่อแยกแยะว่าความร้อนในชุมชนเกิดจาก "ความหนาแน่นอาคาร" หรือ "การขาดพื้นที่สีเขียว"
+            มากน้อยเพียงใด</p>
         </div>
 
         <div class="pipeline-cards">
@@ -190,9 +208,12 @@
             <span class="step-num">ขั้นที่ 1 · ข้อมูลตั้งต้น 3 แหล่ง</span>
             <h4>Physical + Satellite + Human-level IoT</h4>
             <ul>
-              <li><b>building.shp (BMA / Open Buildings):</b> คำนวณสัดส่วนพื้นที่อาคาร (<code>builtup_pct</code>), จำนวนหลัง, จำนวนชั้นเฉลี่ย และ <code>FAR</code></li>
-              <li><b>Landsat 8/9 (30 m):</b> คำนวณอุณหภูมิพื้นผิว (<code>LST</code>), พืชพรรณ (<code>NDVI</code>) และสิ่งปลูกสร้าง (<code>NDBI</code>)</li>
-              <li><b>IoT Walking &amp; Stationary (1 Hz):</b> วัดอุณหภูมิอากาศจริง (<code>temp_c</code>), ความชื้น, แสง และเสียงระดับทางเดินเท้า</li>
+              <li><b>building.shp (BMA / Open Buildings):</b> คำนวณสัดส่วนพื้นที่อาคาร (<code>builtup_pct</code>),
+                จำนวนหลัง, จำนวนชั้นเฉลี่ย และ <code>FAR</code></li>
+              <li><b>Landsat 8/9 (30 m):</b> คำนวณอุณหภูมิพื้นผิว (<code>LST</code>), พืชพรรณ (<code>NDVI</code>)
+                และสิ่งปลูกสร้าง (<code>NDBI</code>)</li>
+              <li><b>IoT Walking &amp; Stationary (1 Hz):</b> วัดอุณหภูมิอากาศจริง (<code>temp_c</code>), ความชื้น, แสง
+                และเสียงระดับทางเดินเท้า</li>
             </ul>
           </div>
           <div class="p-card">
@@ -201,23 +222,29 @@
             <ul>
               <li>กำหนดขนาดกริด <b>90 × 90 ม.</b> (3×3 พิกเซล Landsat) เพื่อลดความคลาดเคลื่อนของพิกัด GPS ขณะเดิน</li>
               <li>คำนวณค่าเฉลี่ยถ่วงน้ำหนักพื้นที่สำหรับ <code>building.shp</code> และค่าเฉลี่ยดาวเทียมในแต่ละเซลล์</li>
-              <li>จับคู่ข้อมูล IoT แบบ <b>Window (09:30–11:30 น.)</b> เพื่อให้ตรงเวลาที่ดาวเทียมโคจรผ่านพื้นที่ศึกษา</li>
+              <li>จับคู่ข้อมูล IoT แบบ <b>Window (09:30–11:30 น.)</b> เพื่อให้ตรงเวลาที่ดาวเทียมโคจรผ่านพื้นที่ศึกษา
+              </li>
             </ul>
           </div>
           <div class="p-card">
             <span class="step-num">ขั้นที่ 3 · แบบจำลองอธิบายความร้อน</span>
             <h4>Statistical &amp; Spatial Modeling</h4>
             <ul>
-              <li><b>Multiple Regression (S3/S4):</b> หาค่าสัมประสิทธิ์มาตรฐาน ($\beta^*$) เพื่อเทียบน้ำหนักของ NDVI vs อาคาร</li>
-              <li><b>Random Forest Importance (S5):</b> จับความสัมพันธ์แบบไม่เป็นเส้นตรง (Non-linear) ของสัณฐานเมือง</li>
-              <li><b>Getis-Ord $G_i^*$ &amp; Moran's $I$:</b> ระบุพิกัดกลุ่มอาคารที่เป็น "เกาะความร้อนวิกฤต" อย่างมีนัยสำคัญทางสถิติ</li>
+              <li><b>Multiple Regression (S3/S4):</b> หาค่าสัมประสิทธิ์มาตรฐาน ($\beta^*$) เพื่อเทียบน้ำหนักของ NDVI vs
+                อาคาร</li>
+              <li><b>Random Forest Importance (S5):</b> จับความสัมพันธ์แบบไม่เป็นเส้นตรง (Non-linear) ของสัณฐานเมือง
+              </li>
+              <li><b>Getis-Ord $G_i^*$ &amp; Moran's $I$:</b> ระบุพิกัดกลุ่มอาคารที่เป็น "เกาะความร้อนวิกฤต"
+                อย่างมีนัยสำคัญทางสถิติ</li>
             </ul>
           </div>
         </div>
 
         <div class="card res-section">
-          <h3>ตารางเปรียบเทียบผลลัพธ์จากข้อมูลของเรา (<span id="res-period-label">กำลังโหลด…</span>) เทียบกับงานวิจัย UHI</h3>
-          <p class="note">ค่าในคอลัมน์ <b>"ผลที่คำนวณได้จากระบบเรา"</b> อัปเดตอัตโนมัติตามช่วงเวลาที่เลือกด้านบน เพื่อใช้เขียนอภิปรายผล (Discussion) เทียบกับงานวิจัยด้านเกาะความร้อนเมือง (Urban Heat Island)</p>
+          <h3>ตารางเปรียบเทียบผลลัพธ์จากข้อมูลของเรา (<span id="res-period-label">กำลังโหลด…</span>) เทียบกับงานวิจัย
+            UHI</h3>
+          <p class="note">ค่าในคอลัมน์ <b>"ผลที่คำนวณได้จากระบบเรา"</b> อัปเดตอัตโนมัติตามช่วงเวลาที่เลือกด้านบน
+            เพื่อใช้เขียนอภิปรายผล (Discussion) เทียบกับงานวิจัยด้านเกาะความร้อนเมือง (Urban Heat Island)</p>
           <div class="table-scroll">
             <table class="res-table">
               <thead>
@@ -249,28 +276,36 @@
               <tbody>
                 <tr>
                   <td><b>ความหนาแน่นอาคาร (building.shp)</b></td>
-                  <td><code>builtup_pct = (Σ Area_bldg / 8100 m²) × 100</code><br><code>FAR = Σ (Area_bldg × Floors) / 8100 m²</code></td>
+                  <td>
+                    <code>builtup_pct = (Σ Area_bldg / 8100 m²) × 100</code><br><code>FAR = Σ (Area_bldg × Floors) / 8100 m²</code>
+                  </td>
                   <td>สะท้อนมวลความร้อน (Thermal Mass) และการบังลม (Wind Blocking) ของกลุ่มอาคารในบล็อก 90×90 ม.</td>
                 </tr>
                 <tr>
                   <td><b>ดัชนีพืชพรรณ &amp; สิ่งปลูกสร้าง</b></td>
-                  <td><code>NDVI = (NIR - Red) / (NIR + Red)</code><br><code>NDBI = (SWIR - NIR) / (SWIR + NIR)</code></td>
+                  <td><code>NDVI = (NIR - Red) / (NIR + Red)</code><br><code>NDBI = (SWIR - NIR) / (SWIR + NIR)</code>
+                  </td>
                   <td>วัดความสามารถในการคายระเหยน้ำลดความร้อน (Evapotranspiration) เทียบกับพื้นผิวคอนกรีต/หลังคา</td>
                 </tr>
                 <tr>
                   <td><b>แบบจำลองอธิบาย LST (S3)</b></td>
-                  <td><code>LST = β₀ + β₁(NDVI) + β₂(NDBI) + β₃(builtup_pct) + ε</code><br>เปรียบเทียบค่ามาตรฐาน <code>β* = β · (SD_x / SD_y)</code></td>
-                  <td>บอกได้ว่าหากเพิ่มพื้นที่สีเขียว 1 SD หรือลดความหนาแน่นอาคาร 1 SD จะลดอุณหภูมิพื้นผิวได้กี่ส่วนเบี่ยงเบนมาตรฐาน</td>
+                  <td><code>LST = β₀ + β₁(NDVI) + β₂(NDBI) + β₃(builtup_pct) + ε</code><br>เปรียบเทียบค่ามาตรฐาน
+                    <code>β* = β · (SD_x / SD_y)</code></td>
+                  <td>บอกได้ว่าหากเพิ่มพื้นที่สีเขียว 1 SD หรือลดความหนาแน่นอาคาร 1 SD
+                    จะลดอุณหภูมิพื้นผิวได้กี่ส่วนเบี่ยงเบนมาตรฐาน</td>
                 </tr>
                 <tr>
                   <td><b>แบบจำลองอุณหภูมิอากาศจริง (S4)</b></td>
                   <td><code>AirTemp_IoT = β₀ + β₁(LST) + β₂(NDVI) + β₃(builtup_pct) + ε</code></td>
-                  <td>เชื่อมความร้อนจากภาพถ่ายดาวเทียมลงสู่ระดับความสูง 1.5 ม. ที่คนเดินเท้าในชุมชนรู้สึกจริง (Microclimate Coupling)</td>
+                  <td>เชื่อมความร้อนจากภาพถ่ายดาวเทียมลงสู่ระดับความสูง 1.5 ม. ที่คนเดินเท้าในชุมชนรู้สึกจริง
+                    (Microclimate Coupling)</td>
                 </tr>
                 <tr>
                   <td><b>ดัชนีจุดร้อนชุมชน (Getis-Ord Gᵢ*)</b></td>
-                  <td><code>Gᵢ* = [Σ wᵢⱼxⱼ - X̄ Σ wᵢⱼ] / [S · √((n Σ wᵢⱼ² - (Σ wᵢⱼ)²)/(n-1))]</code><br>รัศมีเพื่อนบ้าน <code>d = 300 m</code></td>
-                  <td>คัดกรองเฉพาะกลุ่มอาคารที่ร้อนสูงต่อเนื่องเป็นบริเวณกว้าง (Hot Spot 95%/99%) ไม่ใช่จุดร้อนโดดเดี่ยว</td>
+                  <td><code>Gᵢ* = [Σ wᵢⱼxⱼ - X̄ Σ wᵢⱼ] / [S · √((n Σ wᵢⱼ² - (Σ wᵢⱼ)²)/(n-1))]</code><br>รัศมีเพื่อนบ้าน
+                    <code>d = 300 m</code></td>
+                  <td>คัดกรองเฉพาะกลุ่มอาคารที่ร้อนสูงต่อเนื่องเป็นบริเวณกว้าง (Hot Spot 95%/99%) ไม่ใช่จุดร้อนโดดเดี่ยว
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -303,11 +338,21 @@
             <p class="note">โหมดจริงถอดรหัส IMA-ADPCM 16 kHz · โหมด mock จำลองระดับเสียงตาม dB(SPL)</p>
           </div>
         </div>
-        <div class="card"><h3>อุณหภูมิอากาศ °C</h3><div class="chart sm" id="c-temp"></div></div>
-        <div class="card"><h3>ความชื้นสัมพัทธ์ %</h3><div class="chart sm" id="c-hum"></div></div>
-        <div class="card"><h3>ความเข้มแสง lux</h3><div class="chart sm" id="c-lux"></div></div>
+        <div class="card">
+          <h3>อุณหภูมิอากาศ °C</h3>
+          <div class="chart sm" id="c-temp"></div>
+        </div>
+        <div class="card">
+          <h3>ความชื้นสัมพัทธ์ %</h3>
+          <div class="chart sm" id="c-hum"></div>
+        </div>
+        <div class="card">
+          <h3>ความเข้มแสง lux</h3>
+          <div class="chart sm" id="c-lux"></div>
+        </div>
         <div class="card span3">
-          <h3>คุณภาพข้อมูลรายชั่วโมง (loss_rate = missing / expected) <button class="src" data-ep="/quality">/quality</button></h3>
+          <h3>คุณภาพข้อมูลรายชั่วโมง (loss_rate = missing / expected) <button class="src"
+              data-ep="/quality">/quality</button></h3>
           <div class="chart sm" id="c-quality"></div>
         </div>
       </div>
@@ -318,7 +363,8 @@
       <div class="flow-wrap">
         <h2>API Inspector (สำหรับตรวจสอบ JSON ดิบจาก Backend)</h2>
         <div class="try">
-          <input id="try-url" value="/readings?device=IOTW-A001&from=2026-11-21T08:00:00&to=2026-11-21T09:00:00&interval=1min" />
+          <input id="try-url"
+            value="/readings?device=IOTW-A001&from=2026-11-21T08:00:00&to=2026-11-21T09:00:00&interval=1min" />
           <button id="try-go">GET</button>
           <span class="hint">ลอง:
             <a href="#" data-try="/devices">/devices</a> ·
@@ -334,7 +380,8 @@
   </main>
 
   <aside id="log" class="log">
-    <div class="log-head"><strong>API log</strong> <small>คลิกเพื่อดู JSON</small> <button id="log-close" class="ghost">✕</button></div>
+    <div class="log-head"><strong>API log</strong> <small>คลิกเพื่อดู JSON</small> <button id="log-close"
+        class="ghost">✕</button></div>
     <ul id="log-list"></ul>
   </aside>
 
@@ -348,4 +395,5 @@
 
   <script type="module" src="/src/main.ts"></script>
 </body>
+
 </html>
