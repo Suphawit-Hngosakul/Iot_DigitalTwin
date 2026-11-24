@@ -31,7 +31,7 @@ variable "throttle_rate" {
 
 locals {
   function_name = "${var.name_prefix}-api"
-  routes        = ["/devices", "/latest", "/readings", "/quality", "/layers", "/grid", "/grid/{cell_id}"]
+  routes        = ["/devices", "/latest", "/readings", "/quality", "/layers", "/grid", "/grid/{cell_id}", "/analytics/{metric}"]
 }
 
 # handler.py + common/{schema,grid,satellite_schema,curated}.py + devices.csv (stdlib + boto3 only, no layer).

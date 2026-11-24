@@ -548,6 +548,68 @@ def get_grid_cell(params: dict) -> dict:
     return {"cell_id": cell_id, "period": period, "geometry": cell_polygon(cell_id),
             "match": by_match}
 
+# --- analytics: /analytics/{metric} ----------------------------------------
+
+ANALYTICS_METRICS = (
+    "summary",
+    "correlation",
+    "regression",
+    "importance",
+    "groups",
+    "hotspot",
+    "spatial_autocorr",
+    "cell_attribution",
+    "station_diurnal",
+)
+
+
+def _station_diurnal(period: str, match: str) -> dict:
+    """Aggregate hourly air temperature per IoT station from readings_1min."""
+    devs = _devices()
+    temp_col = next((c for c, _ in schema.READINGS_1MIN if "temp" in c), None)
+    by_dev: dict[str, dict[int, float]] = {d_id: {} for d_id in devs}
+    if temp_col:
+        sql = (
+            f"SELECT device_id, HOUR(minute_local) AS hr, AVG({temp_col}) AS val "
+            "FROM readings_1min GROUP BY device_id, HOUR(minute_local)"
+        )
+        try:
+            _, rows = run_query(sql)
+            for dev_id, hr, val in rows:
+                if dev_id in by_dev and hr is not None and val is not None:
+                    by_dev[dev_id][int(hr)] = round(float(val), 2)
+        except ApiError:
+            log.warning("station_diurnal query failed, returning empty hours")
+
+    stations = []
+    for dev_id, d in sorted(devs.items()):
+        hourly = by_dev.get(dev_id, {})
+        stations.append({
+            "device_id": dev_id,
+            "site_name": d.site_name or None,
+            "hours": [{"hour": h, "air_temp_mean": hourly.get(h)} for h in range(24)],
+        })
+    return {"period": period, "match": match, "stations": stations}
+
+
+def get_analytics(params: dict) -> dict:
+    metric = (params.get("metric") or "").strip()
+    if metric not in ANALYTICS_METRICS:
+        raise ApiError(404, f"unknown analytics: {metric}")
+    match = params.get("match") or "all"
+    if match not in MATCH_TYPES:
+        raise ApiError(400, "match must be window or all")
+    period = _grid_period(params)
+
+    s3 = _s3_client()
+    key = f"curated/analytics/{metric}/period={period}/match={match}.json"
+    data = _read_json(s3, key)
+    if data is not None:
+        return data
+    if metric == "station_diurnal":
+        return _station_diurnal(period, match)
+    raise ApiError(404, f"no analytics {metric} for {period} ({match})")
+
 
 ROUTES = {
     "/devices": get_devices,
@@ -558,6 +620,7 @@ ROUTES = {
     "/grid": get_grid,
 }
 GRID_CELL_PREFIX = "/grid/"
+ANALYTICS_PREFIX = "/analytics/"
 
 
 def _cache_key(path: str, params: dict) -> str:
@@ -575,6 +638,9 @@ def handler(event, context=None):
     if fn is None and path_key.startswith(GRID_CELL_PREFIX):
         fn = get_grid_cell
         params = {**params, "cell_id": path_key[len(GRID_CELL_PREFIX):]}
+    elif fn is None and path_key.startswith(ANALYTICS_PREFIX):
+        fn = get_analytics
+        params = {**params, "metric": path_key[len(ANALYTICS_PREFIX):]}
     if fn is None:
         return _resp(404, {"error": f"no route {path}"})
     if method != "GET":
