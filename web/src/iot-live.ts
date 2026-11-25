@@ -25,6 +25,7 @@ class RealtimeIotController {
     private timer: number | null = null;
     private ws: WebSocket | null = null;
     private wsUrl: string | null = null;
+    private apiBase = "";
     private paused = false;
     private lastApiTs = "";
     private staleCount = 0;
@@ -100,26 +101,44 @@ class RealtimeIotController {
 
     private async loadConfigAndDevices() {
         try {
-            const envWs = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_WS_URL;
-            if (envWs) this.wsUrl = envWs;
             const cfgRes = await fetch("./config.json", { cache: "no-store" });
             if (cfgRes.ok) {
                 const cfg = await cfgRes.json();
-                if (cfg.ws_url) this.wsUrl = String(cfg.ws_url);
+                if (cfg.hub_live_url || cfg.ws_url) {
+                    this.wsUrl = String(cfg.hub_live_url || cfg.ws_url);
+                }
+                if (cfg.api_url) {
+                    this.apiBase = String(cfg.api_url).replace(/\/$/, "");
+                }
             }
         } catch {
             // ไม่มี config.json ในเครื่อง Local
         }
 
         try {
-            const res = await api<{ devices: DeviceInfo[] }>("/devices");
-            this.devices = res.devices || [];
+            if (this.apiBase) {
+                const r = await fetch(`${this.apiBase}/devices`);
+                if (r.ok) {
+                    const data = await r.json();
+                    this.devices = data.devices || [];
+                }
+            } else {
+                const res = await api<{ devices: DeviceInfo[] }>("/devices");
+                this.devices = res.devices || [];
+            }
         } catch {
-            this.devices = [{ device_id: "IOTW-A001", site_name: "หน่วยเดินวัดหลัก" } as DeviceInfo];
+            this.devices = [];
+        }
+
+        if (!this.devices.length) {
+            this.devices = [
+                { device_id: "IOTW-A001", site_name: "หน่วยตรวจวัดที่ 1" } as DeviceInfo,
+                { device_id: "IOTW-A002", site_name: "หน่วยตรวจวัดที่ 2" } as DeviceInfo,
+            ];
         }
 
         const sel = document.getElementById("live-dev") as HTMLSelectElement | null;
-        if (sel && this.devices.length) {
+        if (sel) {
             sel.innerHTML = this.devices
                 .map((d) => `<option value="${d.device_id}">${d.device_id}${d.site_name ? ` · ${d.site_name}` : ""}</option>`)
                 .join("");
@@ -228,6 +247,17 @@ class RealtimeIotController {
         }
     }
 
+    private async fetchLatestRow(devId: string): Promise<Record<string, unknown>> {
+        if (this.apiBase) {
+            const r = await fetch(`${this.apiBase}/latest?device=${encodeURIComponent(devId)}`);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const data = await r.json();
+            return (data.row as Record<string, unknown>) || {};
+        }
+        const res = await api<{ row: Record<string, unknown> }>("/latest", { device: devId });
+        return res.row || {};
+    }
+
     private async tick() {
         const devId = (document.getElementById("live-dev") as HTMLSelectElement | null)?.value || "IOTW-A001";
         const mode = (document.getElementById("live-source-mode") as HTMLSelectElement | null)?.value || "auto";
@@ -239,8 +269,7 @@ class RealtimeIotController {
         }
 
         try {
-            const res = await api<{ row: Record<string, unknown> }>("/latest", { device: devId });
-            const r = res.row || {};
+            const r = await this.fetchLatestRow(devId);
             const apiTs = String(r.minute_local || r.ts || "");
 
             if (apiTs && apiTs !== this.lastApiTs) {
@@ -273,11 +302,11 @@ class RealtimeIotController {
 
     private pushSimulatedTick(devId: string, base?: Record<string, unknown>) {
         const prev = this.samples[this.samples.length - 1];
-        const isPark = devId.toLowerCase().includes("park") || devId.endsWith("02");
-        const baseTemp = prev ? prev.temp : Number(base?.temp_c_mean ?? (isPark ? 29.6 : 32.4));
-        const baseHum = prev ? prev.hum : Number(base?.humidity_pct_mean ?? (isPark ? 71 : 61));
-        const baseSpl = prev ? prev.spl : Number(base?.db_spl_mean ?? (isPark ? 54 : 67));
-        const baseLux = prev ? prev.lux : Number(base?.lux_mean ?? (isPark ? 2400 : 8500));
+        const isSecondUnit = devId.toLowerCase().includes("park") || devId.endsWith("02");
+        const baseTemp = prev ? prev.temp : Number(base?.temp_c_mean ?? (isSecondUnit ? 29.6 : 32.4));
+        const baseHum = prev ? prev.hum : Number(base?.humidity_pct_mean ?? (isSecondUnit ? 71 : 61));
+        const baseSpl = prev ? prev.spl : Number(base?.db_spl_mean ?? (isSecondUnit ? 54 : 67));
+        const baseLux = prev ? prev.lux : Number(base?.lux_mean ?? (isSecondUnit ? 2400 : 8500));
 
         const jitter = (scale: number) => (Math.random() - 0.5) * scale;
         const temp = Math.max(24, Math.min(42, +(baseTemp + jitter(0.25)).toFixed(2)));
