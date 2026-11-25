@@ -1509,3 +1509,62 @@ main {
 .live-kpi.amber {
   border-top-color: #f59e0b;
 }
+
+/* Current Live IoT Position Marker */
+.iot-live-marker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.iot-live-badge {
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1.5px solid #38bdf8;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+  margin-bottom: 4px;
+}
+
+.iot-live-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #0ea5e9;
+  border: 3px solid #ffffff;
+  box-shadow: 0 0 0 6px rgba(14, 165, 233, 0.35);
+  animation: iotRadarPulse 1.8s infinite;
+}
+
+@keyframes iotRadarPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(14, 165, 233, 0.55);
+  }
+
+  70% {
+    box-shadow: 0 0 0 12px rgba(14, 165, 233, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(14, 165, 233, 0);
+  }
+}
+
+.iot-now-box {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 12px;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}

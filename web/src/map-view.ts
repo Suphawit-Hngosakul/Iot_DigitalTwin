@@ -250,6 +250,11 @@ export class MapController {
   grid: GridFeatureCollection | null = null;
   devices: DeviceInfo[] = [];
   stationMarkers: maplibregl.Marker[] = [];
+  private liveMarker: maplibregl.Marker | null = null;
+  private liveCoords: [number, number] | null = null;
+  private liveRefreshTimer: number | null = null;
+  // ข้อมูลล่าสุดของหมุดปัจจุบัน (ใช้กับ popup เพื่อให้ค่าอัปเดตตามรอบรีเฟรช)
+  private liveInfo: { devId: string; ts: string; row: Record<string, unknown> } | null = null;
   projectMode: ProjectMode = "project2";
   fitted = false;
   pitched = true;
@@ -370,6 +375,10 @@ export class MapController {
     this.stationMarkers.forEach((mk) => {
       mk.getElement().style.display = isCs341 ? "none" : "";
     });
+
+    if (this.liveMarker) {
+      this.liveMarker.getElement().style.display = isCs341 ? "none" : "";
+    }
   }
 
   private bindUi() {
@@ -427,6 +436,13 @@ export class MapController {
       const show = this.projectMode === "project2" && (e.target as HTMLInputElement).checked;
       ["track-pts", "track-line"].filter((l) => this.map.getLayer(l)).forEach((l) => this.map.setLayoutProperty(l, "visibility", show ? "visible" : "none"));
     };
+
+    // ปุ่มโฟกัสไปที่พิกัดปัจจุบันของอุปกรณ์
+    document.getElementById("iot-focus-now")?.addEventListener("click", () => {
+      if (this.liveCoords) {
+        this.map.easeTo({ center: this.liveCoords, zoom: Math.max(this.map.getZoom(), 16.5), duration: 500 });
+      }
+    });
 
     // คลิกอาคาร 3D -> เปิด Dashboard ด้านขวา
     this.map.on("click", "bldg-3d", (e) => {
@@ -1076,8 +1092,27 @@ export class MapController {
       const vis = this.projectMode === "project2" ? "visible" : "none";
       this.map.addSource("track-line", { type: "geojson", data: line as unknown as GeoJSON.Feature });
       this.map.addSource("track", { type: "geojson", data: fc as unknown as GeoJSON.FeatureCollection });
-      this.map.addLayer({ id: "track-line", type: "line", source: "track-line", layout: { visibility: vis }, paint: { "line-color": "#0f172a", "line-width": 2, "line-opacity": 0.65 } });
-      this.map.addLayer({ id: "track-pts", type: "circle", source: "track", layout: { visibility: vis }, paint: { "circle-radius": 4.5, "circle-stroke-color": "#fff", "circle-stroke-width": 1 } });
+      // เส้นทางย้อนหลังปรับให้ดูเบาลง เพื่อให้หมุดพิกัดปัจจุบันเด่นขึ้น
+      this.map.addLayer({
+        id: "track-line",
+        type: "line",
+        source: "track-line",
+        layout: { visibility: vis },
+        paint: { "line-color": "#0f172a", "line-width": 1.5, "line-opacity": 0.35 },
+      });
+      this.map.addLayer({
+        id: "track-pts",
+        type: "circle",
+        source: "track",
+        layout: { visibility: vis },
+        paint: {
+          "circle-radius": 3.5,
+          "circle-opacity": 0.55,
+          "circle-stroke-color": "#fff",
+          "circle-stroke-width": 1,
+          "circle-stroke-opacity": 0.6,
+        },
+      });
       this.map.on("click", "track-pts", (e) => {
         const p = e.features?.[0]?.properties || {};
         new maplibregl.Popup()
@@ -1094,6 +1129,9 @@ export class MapController {
       });
     }
     this.styleTrack();
+
+    // อัปเดตหมุดพิกัดปัจจุบัน (แยกจากเส้นทางย้อนหลัง)
+    await this.refreshCurrentPosition(dev);
   }
 
   styleTrack() {
@@ -1101,6 +1139,84 @@ export class MapController {
     const v = (document.getElementById("track-color") as HTMLSelectElement).value;
     this.map.setPaintProperty("track-pts", "circle-color", interp(v, TRACK_STOPS[v]));
     document.getElementById("track-legend")!.innerHTML = legendHtml(TRACK_STOPS[v]);
+  }
+
+  async refreshCurrentPosition(devId: string) {
+    const nowText = document.getElementById("iot-now-text");
+    const nowMeta = document.getElementById("iot-now-meta");
+    if (!devId) return;
+
+    try {
+      const latest = await api<{ row?: Record<string, unknown> }>("/latest", { device: devId });
+      const r = latest.row || {};
+      const lat = r.lat != null ? Number(r.lat) : null;
+      const lon = r.lon != null ? Number(r.lon) : null;
+      const ts = String(r.minute_local || r.ts || "");
+
+      if (lat != null && lon != null && !Number.isNaN(lat) && !Number.isNaN(lon)) {
+        this.liveCoords = [lon, lat];
+        this.liveInfo = { devId, ts, row: r };
+
+        if (!this.liveMarker) {
+          const wrapper = document.createElement("div");
+          wrapper.className = "iot-live-marker";
+          wrapper.innerHTML = `<div class="iot-live-badge" id="iot-live-pin-label">${esc(devId)} · ปัจจุบัน</div><div class="iot-live-dot"></div>`;
+          wrapper.onclick = (ev) => {
+            ev.stopPropagation();
+            // อ่านค่าล่าสุดจาก liveInfo/liveCoords เพื่อไม่ให้ popup แสดงค่าเก่าหลังรีเฟรช
+            const cur = this.liveInfo;
+            const pos = this.liveCoords;
+            if (!cur || !pos) return;
+            const cr = cur.row;
+            new maplibregl.Popup()
+              .setLngLat(pos)
+              .setHTML(`<div class="pop"><b>🔴 พิกัดปัจจุบัน ${esc(cur.devId)}</b><br>
+                <table>
+                  <tr><td>เวลาล่าสุด</td><td><b>${esc(cur.ts || "ล่าสุด")}</b></td></tr>
+                  <tr><td>อุณหภูมิอากาศ</td><td><b>${esc(cr.temp_c_mean ?? cr.temp_c ?? "—")} °C</b></td></tr>
+                  <tr><td>ระดับเสียง</td><td>${esc(cr.db_spl_mean ?? cr.db_spl ?? "—")} dB</td></tr>
+                  <tr><td>พิกัด</td><td>${pos[1].toFixed(5)}, ${pos[0].toFixed(5)}</td></tr>
+                </table></div>`)
+              .addTo(this.map);
+          };
+          this.liveMarker = new maplibregl.Marker({ element: wrapper, anchor: "bottom" })
+            .setLngLat([lon, lat])
+            .addTo(this.map);
+        } else {
+          this.liveMarker.setLngLat([lon, lat]);
+          const lbl = this.liveMarker.getElement().querySelector("#iot-live-pin-label");
+          if (lbl) lbl.textContent = `${devId} · ${ts ? ts.slice(11, 19) : "ปัจจุบัน"}`;
+        }
+
+        if (this.liveMarker) {
+          this.liveMarker.getElement().style.display = this.projectMode === "cs341" ? "none" : "";
+        }
+
+        if (nowText) nowText.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+        if (nowMeta) {
+          nowMeta.textContent = `อัปเดต ${ts || "ล่าสุด"} · อุณหภูมิ ${fmt(r.temp_c_mean ?? r.temp_c, 1)} °C`;
+        }
+      } else {
+        this.liveCoords = null;
+        this.liveInfo = null;
+        this.liveMarker?.remove();
+        this.liveMarker = null;
+        if (nowText) nowText.textContent = "ไม่มีพิกัด GPS ในข้อมูลล่าสุด";
+        if (nowMeta) nowMeta.textContent = "แสดงเฉพาะเส้นทางเดินย้อนหลังตามวันที่เลือก";
+      }
+    } catch {
+      if (nowText) nowText.textContent = "ดึงพิกัดล่าสุดไม่สำเร็จ";
+      if (nowMeta) nowMeta.textContent = "ตรวจสอบการเชื่อมต่อ /latest API";
+    }
+
+    if (this.liveRefreshTimer === null) {
+      this.liveRefreshTimer = window.setInterval(() => {
+        const curDev = (document.getElementById("track-dev") as HTMLSelectElement | null)?.value;
+        if (curDev && this.projectMode === "project2") {
+          this.refreshCurrentPosition(curDev);
+        }
+      }, 10000);
+    }
   }
 
   async loadDevicesOnMap() {
