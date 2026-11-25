@@ -1,24 +1,30 @@
 import * as echarts from "echarts";
 import { api, toMinuteObjects } from "./api";
-import { LiveAudioPlayer } from "./audio";
-import type { DeviceInfo, LiveDeviceState, QualityResponse, ReadingsResponse } from "./types";
+import type { DeviceInfo, QualityResponse, ReadingMinuteRow, ReadingsResponse } from "./types";
 
-const fmt = (v: unknown, d = 1) => (v == null ? "—" : typeof v === "number" ? v.toFixed(d) : String(v));
+const fmt = (v: unknown, d = 1) => (v == null || Number.isNaN(Number(v)) ? "—" : Number(v).toFixed(d));
 const dayOf = (s?: string | null) => (s || "").slice(0, 10);
 const nextDay = (day: string) => new Date(Date.parse(day + "T00:00:00Z") + 86400000).toISOString().slice(0, 10);
 const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+
+function statsOf(vals: (number | null | undefined)[]) {
+  const clean = vals.filter((v): v is number => typeof v === "number" && !Number.isNaN(v));
+  if (!clean.length) return { avg: null, min: null, max: null };
+  const sum = clean.reduce((a, b) => a + b, 0);
+  return {
+    avg: sum / clean.length,
+    min: Math.min(...clean),
+    max: Math.max(...clean),
+  };
+}
 
 export class IotController {
   private charts: Record<string, echarts.ECharts> = {};
   private devices: DeviceInfo[] | null = null;
   private lastKey: string | null = null;
-  private player: LiveAudioPlayer | null = null;
-  private listeningDevice: string | null = null;
+  private lastRows: Record<string, unknown>[] = [];
 
-  constructor(
-    private getLiveState: () => Record<string, LiveDeviceState>,
-    private sendWs: (payload: unknown) => boolean
-  ) {
+  constructor() {
     this.bindUi();
   }
 
@@ -33,63 +39,47 @@ export class IotController {
   private bindUi() {
     const devSel = document.getElementById("iot-dev") as HTMLSelectElement;
     const dateIn = document.getElementById("iot-date") as HTMLInputElement;
+    const winSel = document.getElementById("iot-window") as HTMLSelectElement;
+    const intSel = document.getElementById("iot-interval") as HTMLSelectElement;
     const dbaIn = document.getElementById("iot-dba") as HTMLInputElement;
+    const exportBtn = document.getElementById("iot-export") as HTMLButtonElement;
 
     devSel.onchange = () => {
       const d = this.devices?.find((x) => x.device_id === devSel.value);
       if (d?.latest_hour_local) dateIn.value = dayOf(d.latest_hour_local);
       this.load();
-      this.renderLive();
     };
     dateIn.onchange = () => this.load();
+    winSel.onchange = () => this.load();
+    intSel.onchange = () => {
+      // โหมด 1s รองรับสูงสุด 6 ชั่วโมง หากเลือกทั้งวันอยู่ให้สลับเป็นช่วงเช้าให้อัตโนมัติ
+      if (intSel.value === "1s" && winSel.value === "all") {
+        winSel.value = "morning";
+      }
+      this.load();
+    };
     dbaIn.onchange = () => this.load();
 
-    const listenBtn = document.getElementById("listen") as HTMLButtonElement;
-    listenBtn.onclick = () => {
-      const id = devSel.value;
-      const statusEl = document.getElementById("audio-status")!;
-      if (!this.player) {
-        if (!this.sendWs({ t: "listen", device_id: id })) {
-          statusEl.textContent = "ยังไม่ได้เชื่อมต่อ ws /live";
-          return;
-        }
-        this.player = new LiveAudioPlayer();
-        this.listeningDevice = id;
-        listenBtn.textContent = "■ หยุดฟัง";
-        listenBtn.classList.add("stop");
-        statusEl.innerHTML = `ส่ง <code>{"t":"listen","device_id":"${esc(id)}"}</code> แล้ว`;
-      } else {
-        if (this.listeningDevice) this.sendWs({ t: "unlisten", device_id: this.listeningDevice });
-        this.player.stop();
-        this.player = null;
-        this.listeningDevice = null;
-        listenBtn.textContent = "▶ ฟังเสียงสด";
-        listenBtn.classList.remove("stop");
-        statusEl.innerHTML = `ส่ง <code>{"t":"unlisten"}</code> แล้ว`;
-      }
+    exportBtn.onclick = () => {
+      if (!this.lastRows.length) return;
+      const cols = Object.keys(this.lastRows[0]);
+      const csv = [
+        cols.join(","),
+        ...this.lastRows.map((r) => cols.map((c) => JSON.stringify(r[c] ?? "")).join(",")),
+      ].join("\n");
+      const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${devSel.value}_${dateIn.value}_${intSel.value}.csv`;
+      a.click();
     };
   }
 
-  onAudioFrame(buf: ArrayBuffer) {
-    if (!this.player) return;
-    this.player.onFrame(buf);
-    if (this.player.frames % 5 === 0) this.renderAudioStats();
-  }
-
-  onAudioStats(lost: number) {
-    if (!this.player) return;
-    this.player.lost = lost;
-    this.renderAudioStats();
-  }
-
-  private renderAudioStats() {
-    const p = this.player;
-    if (!p?.lastHeader) return;
-    const h = p.lastHeader;
-    document.getElementById("audio-stats")!.innerHTML =
-      `<span>frame ล่าสุด</span><b>type=0x0${h.type} v${h.version} samples=${h.samples} seq=${h.seq} (${h.bytes} B)</b>` +
-      `<span>รับแล้ว</span><b>${p.frames} frame (~10/วินาที)</b>` +
-      `<span>audio_stats.lost</span><b class="${p.lost > 5 ? "warn" : ""}">${p.lost}${p.lost > 5 ? " สัญญาณขาด" : ""}</b>`;
+  private getRange(day: string, win: string) {
+    if (win === "morning") return { from: `${day}T06:00:00`, to: `${day}T12:00:00` };
+    if (win === "afternoon") return { from: `${day}T12:00:00`, to: `${day}T18:00:00` };
+    if (win === "evening") return { from: `${day}T18:00:00`, to: `${nextDay(day)}T00:00:00` };
+    return { from: `${day}T00:00:00`, to: `${nextDay(day)}T00:00:00` };
   }
 
   async load(force = false) {
@@ -104,6 +94,9 @@ export class IotController {
 
     const sel = document.getElementById("iot-dev") as HTMLSelectElement;
     const dateIn = document.getElementById("iot-date") as HTMLInputElement;
+    const winSel = document.getElementById("iot-window") as HTMLSelectElement;
+    const intSel = document.getElementById("iot-interval") as HTMLSelectElement;
+
     if (!sel.options.length) {
       sel.innerHTML = this.devices
         .map((d) => `<option value="${esc(d.device_id)}">${esc(d.device_id)} (${esc(d.device_type)}${d.site_name ? " · " + esc(d.site_name) : ""})</option>`)
@@ -117,53 +110,107 @@ export class IotController {
 
     const dev = sel.value;
     const day = dateIn.value;
+    const win = winSel.value;
+    const interval = intSel.value as "1min" | "1s";
     const showDba = (document.getElementById("iot-dba") as HTMLInputElement).checked;
-    const key = `${dev}|${day}|${showDba}`;
+    const key = `${dev}|${day}|${win}|${interval}|${showDba}`;
     if (!force && key === this.lastKey) return;
     this.lastKey = key;
 
-    const range = { device: dev, from: day + "T00:00:00", to: nextDay(day) + "T00:00:00" };
+    const range = this.getRange(day, win);
     const [rd, ql] = await Promise.all([
-      api<ReadingsResponse>("/readings", { interval: "1min", ...range }).catch((e) => ({ device: dev, interval: "1min" as const, from: "", to: "", columns: [], rows: [], _err: e })),
-      api<QualityResponse>("/quality", range).catch(() => ({ device: dev, from: "", to: "", hours: [] })),
+      api<ReadingsResponse>("/readings", { interval, device: dev, ...range }).catch((e) => ({
+        device: dev,
+        interval,
+        from: "",
+        to: "",
+        columns: [],
+        rows: [],
+        _err: e,
+      })),
+      api<QualityResponse>("/quality", { device: dev, ...range }).catch(() => ({
+        device: dev,
+        from: "",
+        to: "",
+        hours: [],
+      })),
     ]);
 
-    const rows = toMinuteObjects(rd);
-    const x = rows.map((r) => r.minute_local.slice(11, 16));
+    const rows = toMinuteObjects(rd) as unknown as Record<string, unknown>[];
+    this.lastRows = rows;
+
+    const is1s = interval === "1s";
+    const x = rows.map((r) => String(r[is1s ? "ts_local" : "minute_local"] || "").slice(11, is1s ? 19 : 16));
+    const temps = rows.map((r) => (r[is1s ? "temp_c" : "temp_c_mean"] as number) ?? null);
+    const hums = rows.map((r) => (r[is1s ? "humidity_pct" : "humidity_pct_mean"] as number) ?? null);
+    const luxs = rows.map((r) => (r[is1s ? "lux" : "lux_mean"] as number) ?? null);
+    const splMean = rows.map((r) => (r[is1s ? "db_spl" : "db_spl_mean"] as number) ?? null);
+    const dbaMean = rows.map((r) => (r[is1s ? "dba" : "dba_mean"] as number) ?? null);
+    const splMin = rows.map((r) => (is1s ? null : ((r as unknown as ReadingMinuteRow).db_spl_min ?? null)));
+    const splMax = rows.map((r) => (is1s ? null : ((r as unknown as ReadingMinuteRow).db_spl_max ?? null)));
+
+    const tStat = statsOf(temps);
+    const hStat = statsOf(hums);
+    const sStat = statsOf(splMean);
+    const lStat = statsOf(luxs);
+
+    document.getElementById("iot-kpis")!.innerHTML = `
+      <div class="kpi"><div class="l">อุณหภูมิอากาศเฉลี่ย</div><div class="v">${fmt(tStat.avg, 1)} °C</div><div class="l">ต่ำสุด ${fmt(tStat.min, 1)} · สูงสุด ${fmt(tStat.max, 1)} °C</div></div>
+      <div class="kpi"><div class="l">ความชื้นสัมพัทธ์เฉลี่ย</div><div class="v">${fmt(hStat.avg, 1)} %</div><div class="l">ต่ำสุด ${fmt(hStat.min, 1)} · สูงสุด ${fmt(hStat.max, 1)} %</div></div>
+      <div class="kpi"><div class="l">ระดับเสียงเฉลี่ย</div><div class="v">${fmt(sStat.avg, 1)} dB</div><div class="l">ต่ำสุด ${fmt(sStat.min, 1)} · สูงสุด ${fmt(sStat.max, 1)} dB</div></div>
+      <div class="kpi"><div class="l">ความเข้มแสงเฉลี่ย</div><div class="v">${fmt(lStat.avg, 0)} lux</div><div class="l">สูงสุด ${fmt(lStat.max, 0)} lux</div></div>
+      <div class="kpi"><div class="l">จำนวนข้อมูลที่บันทึกได้</div><div class="v">${rows.length.toLocaleString()}</div><div class="l">${is1s ? "วินาที" : "นาที"} · วันที่ ${day}</div></div>
+    `;
+
     const errObj = (rd as { _err?: Error })._err;
-    const empty = errObj ? "error: " + errObj.message : rows.length ? "" : `ไม่มีข้อมูล ${dev} วันที่ ${day}`;
+    const empty = errObj ? "เกิดข้อผิดพลาด: " + errObj.message : rows.length ? "" : `ไม่พบข้อมูลย้อนหลังของ ${dev} ในวันที่ ${day}`;
 
     const base = (name: string) => ({
-      title: { text: empty, left: "center", top: "middle", textStyle: { fontSize: 12, color: "#999" } },
+      title: { text: empty, left: "center", top: "middle", textStyle: { fontSize: 13, color: "#94a3b8" } },
       tooltip: { trigger: "axis" },
-      grid: { left: 45, right: 10, top: 25, bottom: 25 },
+      grid: { left: 48, right: 14, top: 28, bottom: 26 },
       xAxis: { type: "category", data: x },
       yAxis: { type: "value", scale: true, name },
       dataZoom: [{ type: "inside" }],
     });
 
-    const splSeries: unknown[] = [
-      { name: "min", type: "line", data: rows.map((r) => r.db_spl_min), stack: "band", lineStyle: { opacity: 0 }, showSymbol: false },
-      {
-        name: "max-min",
-        type: "line",
-        data: rows.map((r) => (r.db_spl_max != null && r.db_spl_min != null ? +(r.db_spl_max - r.db_spl_min).toFixed(2) : null)),
-        stack: "band",
-        lineStyle: { opacity: 0 },
-        areaStyle: { color: "rgba(15,118,110,.15)" },
-        showSymbol: false,
-        tooltip: { show: false },
-      },
-      { name: "db_spl_mean", type: "line", data: rows.map((r) => r.db_spl_mean), showSymbol: false, lineStyle: { color: "#0f766e" } },
-    ];
+    const splSeries: unknown[] = [];
+    if (!is1s) {
+      splSeries.push(
+        { name: "min", type: "line", data: splMin, stack: "band", lineStyle: { opacity: 0 }, showSymbol: false, tooltip: { show: false } },
+        {
+          name: "range",
+          type: "line",
+          data: splMax.map((mx, i) => (mx != null && splMin[i] != null ? +(mx - splMin[i]!).toFixed(2) : null)),
+          stack: "band",
+          lineStyle: { opacity: 0 },
+          areaStyle: { color: "rgba(15,118,110,.15)" },
+          showSymbol: false,
+          tooltip: { show: false },
+        }
+      );
+    }
+    splSeries.push({ name: "เสียงเฉลี่ย dB(SPL)", type: "line", data: splMean, showSymbol: false, lineStyle: { color: "#0f766e", width: 2 } });
     if (showDba) {
-      splSeries.push({ name: "dba_mean", type: "line", data: rows.map((r) => r.dba_mean), showSymbol: false, lineStyle: { color: "#f59e0b" } });
+      splSeries.push({ name: "เสียง dBA", type: "line", data: dbaMean, showSymbol: false, lineStyle: { color: "#f59e0b", width: 1.8 } });
     }
 
-    this.chart("c-spl").setOption({ ...base("dB"), legend: { top: 0, data: ["db_spl_mean", "dba_mean"] }, series: splSeries }, true);
-    this.chart("c-temp").setOption({ ...base("°C"), series: [{ type: "line", data: rows.map((r) => r.temp_c_mean), showSymbol: false, lineStyle: { color: "#d7191c" } }] }, true);
-    this.chart("c-hum").setOption({ ...base("%"), series: [{ type: "line", data: rows.map((r) => r.humidity_pct_mean), showSymbol: false, lineStyle: { color: "#2c7bb6" } }] }, true);
-    this.chart("c-lux").setOption({ ...base("lux"), series: [{ type: "line", data: rows.map((r) => r.lux_mean), showSymbol: false, lineStyle: { color: "#eab308" } }] }, true);
+    this.chart("c-spl").setOption(
+      { ...base("dB"), legend: { top: 0, data: ["เสียงเฉลี่ย dB(SPL)", "เสียง dBA"] }, series: splSeries },
+      true
+    );
+    this.chart("c-temp").setOption(
+      { ...base("°C"), series: [{ name: "อุณหภูมิ", type: "line", data: temps, showSymbol: false, lineStyle: { color: "#dc2626", width: 2 } }] },
+      true
+    );
+    this.chart("c-hum").setOption(
+      { ...base("%"), series: [{ name: "ความชื้น", type: "line", data: hums, showSymbol: false, lineStyle: { color: "#2563eb", width: 2 } }] },
+      true
+    );
+    this.chart("c-lux").setOption(
+      { ...base("lux"), series: [{ name: "แสง", type: "line", data: luxs, showSymbol: false, lineStyle: { color: "#eab308", width: 2 } }] },
+      true
+    );
 
     this.chart("c-quality").setOption(
       {
@@ -171,52 +218,22 @@ export class IotController {
           trigger: "axis",
           formatter: (ps: { dataIndex: number }[]) => {
             const h = ql.hours[ps[0].dataIndex];
-            return `${esc(h.batch_id)}<br>loss_rate ${(h.loss_rate * 100).toFixed(2)}%<br>expected ${h.expected_rows} · missing ${h.missing_rows}<br>duplicate ${h.duplicate_rows} · invalid ${h.invalid_rows} · sessions ${h.sessions}`;
+            const okPct = Math.max(0, 100 - h.loss_rate * 100).toFixed(1);
+            return `เวลา ${h.hour_local.slice(11, 13)}:00 น.<br>ความสมบูรณ์ข้อมูล: <b>${okPct}%</b><br>ได้รับ ${h.received_rows} / ${h.expected_rows} แถว`;
           },
         },
-        grid: { left: 45, right: 10, top: 20, bottom: 25 },
+        grid: { left: 48, right: 14, top: 24, bottom: 26 },
         xAxis: { type: "category", data: ql.hours.map((h) => h.hour_local.slice(11, 13) + ":00") },
-        yAxis: { type: "value", name: "loss %", axisLabel: { formatter: (v: number) => v + "%" } },
+        yAxis: { type: "value", min: 0, max: 100, name: "%" },
         series: [
           {
             type: "bar",
-            data: ql.hours.map((h) => +(h.loss_rate * 100).toFixed(2)),
-            itemStyle: { color: (p: { value: number }) => (p.value > 2 ? "#dc2626" : "#16a34a") },
+            data: ql.hours.map((h) => +Math.max(0, 100 - h.loss_rate * 100).toFixed(1)),
+            itemStyle: { color: (p: { value: number }) => (p.value >= 95 ? "#16a34a" : "#f59e0b"), borderRadius: [4, 4, 0, 0] },
           },
         ],
       },
       true
     );
-
-    this.renderLive();
-  }
-
-  renderLive() {
-    const liveMap = this.getLiveState();
-    document.getElementById("live-mini")!.innerHTML = Object.entries(liveMap)
-      .map(
-        ([id, L]) =>
-          `<div class="lv"><span class="dot ${L.online ? "on" : "off"}"></span><b>${esc(id)}</b> ${
-            L.online ? `${fmt(L.temp_c)} °C · ${fmt(L.db_spl)} dB(SPL) · ${L.ts ? esc(L.ts.slice(11)) : ""}` : "offline"
-          }</div>`
-      )
-      .join("");
-
-    const id = (document.getElementById("iot-dev") as HTMLSelectElement).value;
-    const L = liveMap[id];
-    const bigEl = document.getElementById("live-big")!;
-    if (!L) {
-      bigEl.innerHTML = `<p class="note">ยังไม่มีข้อความของ ${esc(id)}</p>`;
-      return;
-    }
-    if (!L.online || !L.ts) {
-      bigEl.innerHTML = `<p><span class="dot off"></span>${esc(id)} offline (hub ส่ง <code>{"t":"status","online":false}</code>)</p>`;
-      return;
-    }
-    bigEl.innerHTML = `<div><span class="dot on"></span>${esc(id)} · ${esc(L.ts)}</div><div class="big">${fmt(L.db_spl)} dB(SPL)</div>
-      <div class="kv small"><span>dBA</span><b>${fmt(L.dba)}</b><span>อุณหภูมิ</span><b>${fmt(L.temp_c)} °C</b><span>ความชื้น</span><b>${fmt(L.humidity_pct)} %</b><span>แสง</span><b>${fmt(L.lux, 0)} lux</b>
-      <span>GPS</span><b>${fmt(L.lat, 5)}, ${fmt(L.lon, 5)}</b><span>heap / rssi</span><b>${L.health?.heap_free ?? "—"} B · ${L.health?.rssi ?? "—"} dBm</b></div>`;
-
-    this.player?.updateMockLevel(L.db_spl);
   }
 }
