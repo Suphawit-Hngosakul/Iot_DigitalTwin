@@ -62,9 +62,9 @@
               <div class="sub-title">ชุมชนเปราะบาง 36 แห่ง (CS341)</div>
               <label class="row"><input type="checkbox" id="comm-on" checked /> แสดงขอบเขตชุมชน (รัศมี 150 ม.)</label>
               <div class="legend">
-                <span class="sw" style="background:#ef4444"></span>เสี่ยงสูง
+                <span class="sw" style="background:#ef4444"></span>เปราะบางสูง
                 <span class="sw" style="background:#f59e0b"></span>ปานกลาง
-                <span class="sw" style="background:#10b981"></span>เสี่ยงต่ำ
+                <span class="sw" style="background:#10b981"></span>เปราะบางต่ำกว่าเกณฑ์
               </div>
               <p class="note" id="comm-note">กำลังโหลดข้อมูลชุมชน…</p>
             </div>
@@ -171,7 +171,7 @@
       </div>
     </section>
 
-    <!-- ② วิเคราะห์ปัจจัยความร้อน (รวมหน้าคำนวณ & เทียบงานวิจัย และหน้าจัดลำดับชุมชน CS341) -->
+    <!-- ② วิเคราะห์ปัจจัยความร้อน -->
     <section id="tab-stats" class="tab">
       <div class="stats-toolbar">
         <div id="headline" class="headline">กำลังวิเคราะห์ความร้อนในชุมชน…</div>
@@ -352,46 +352,47 @@
         </div>
       </div>
 
-      <!-- มุมมองย่อย 2.3: วิเคราะห์ความเปราะบางและจัดลำดับความช่วยเหลือชุมชน (แสดงเฉพาะโหมด CS341) -->
+      <!-- มุมมองย่อย 2.3: วิเคราะห์ความเปราะบางและจำลองสมมติฐานชุมชน (แสดงเฉพาะโหมด CS341) -->
       <div id="cs341-stats-view" class="hidden">
         <div class="res-wrap">
           <div class="res-hero" style="background: linear-gradient(135deg, #b91c1c, #d97706); margin-bottom: 12px;">
             <div>
-              <h2>ระบบจัดลำดับความสำคัญการช่วยเหลือชุมชนเปราะบาง (CS341 Priority Decision)</h2>
-              <p>วิเคราะห์เปรียบเทียบ <b>ความร้อนพื้นผิว (LST)</b> + <b>ความหนาแน่นอาคาร</b> +
-                <b>สัดส่วนพื้นที่สีเขียว</b> เพื่อระบุว่าชุมชนใดต้องได้รับการแทรกแซงเชิงออกแบบและผังเมืองก่อน–หลัง</p>
+              <h2>วิเคราะห์ความเปราะบางและจำลองสมมติฐานการเพิ่มต้นไม้ (CS341)</h2>
+              <p>สีวงกลมบนแผนที่แสดง <b>ระดับความเปราะบาง (ไม่ใช่ °C)</b> ส่วนตัวเลขการเพิ่มต้นไม้ 10–50 ต้นเป็น
+                <b>ค่าสมมติเชิงจำลอง</b> เพื่อเปรียบเทียบสัดส่วนพื้นที่สีเขียว (ยังไม่ได้ลงพื้นที่จริง)</p>
             </div>
           </div>
 
           <div id="cs341-kpis" class="cards"></div>
 
-          <h3 style="margin: 14px 0 8px; font-size: 14.5px;">🚨 3 ชุมชนเร่งด่วนสูงสุดที่ควรเข้าช่วยเหลือก่อน (Top
-            Priority Intervention)</h3>
+          <div id="cs341-sim-dashboard"></div>
+
+          <h3 style="margin: 14px 0 8px; font-size: 14.5px;">3 ชุมชนคะแนนความเปราะบางสูงสุดในดัชนี</h3>
           <div id="cs341-top-spotlight" class="takeaway-grid"></div>
 
           <div class="grid2" style="margin-bottom: 12px;">
             <div class="card">
-              <h3>1. 10 อันดับชุมชนที่มีคะแนนความเปราะบางสูงสุด (Vulnerability Score)</h3>
+              <h3>1. 10 อันดับชุมชนที่มีคะแนนความเปราะบางสูงสุด</h3>
               <div class="chart" id="cs341-c-bar"></div>
             </div>
             <div class="card">
-              <h3>2. ความสัมพันธ์ความหนาแน่นอาคาร vs ความร้อน LST (ขนาดจุด = ความขาดแคลนพื้นที่สีเขียว)</h3>
+              <h3>2. ความหนาแน่นอาคาร vs ความร้อน LST (ขนาดจุด = ความขาดแคลนพื้นที่สีเขียว)</h3>
               <div class="chart" id="cs341-c-scatter"></div>
             </div>
           </div>
 
           <div class="card" style="margin-bottom: 12px;">
             <h3>
-              <span>3. ตารางจัดลำดับความช่วยเหลือและแผนแก้ไขเชิงผังเมืองรายชุมชน</span>
+              <span>3. ตารางชุมชนและปุ่มดูตำแหน่งบนแผนที่ / จำลองสมมติฐาน</span>
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <select id="cs341-filter-district">
                   <option value="all">ทุกเขตพื้นที่</option>
                 </select>
                 <select id="cs341-filter-tier">
                   <option value="all">ทุกระดับความเปราะบาง</option>
-                  <option value="high">เฉพาะเสี่ยงสูง / วิกฤต</option>
-                  <option value="moderate">ระดับปานกลาง</option>
-                  <option value="low">ความเสี่ยงต่ำ</option>
+                  <option value="high">เปราะบางสูง</option>
+                  <option value="moderate">ปานกลาง</option>
+                  <option value="low">เปราะบางต่ำกว่าเกณฑ์</option>
                 </select>
               </div>
             </h3>
@@ -401,21 +402,16 @@
                   <tr>
                     <th>อันดับ</th>
                     <th>ชื่อชุมชน / เขต</th>
-                    <th>ระดับความเสี่ยง</th>
+                    <th>ระดับความเปราะบาง</th>
                     <th>LST (300 ม.)</th>
                     <th>อาคาร (%)</th>
                     <th>พื้นที่สีเขียว</th>
-                    <th>แนวทางออกแบบและแก้ไขเร่งด่วน (เรียงลำดับก่อน → หลัง)</th>
+                    <th>ปุ่มดูบนแผนที่ &amp; จำลองสมมติฐาน</th>
                   </tr>
                 </thead>
                 <tbody id="cs341-ranking-body"></tbody>
               </table>
             </div>
-          </div>
-
-          <div class="card">
-            <h3>📖 คำอธิบายตัวชี้วัดและเกณฑ์การจัดลำดับความเปราะบาง (Indicator Glossary)</h3>
-            <div id="cs341-glossary-box" class="glossary-list" style="max-height: none; padding: 6px 0;"></div>
           </div>
         </div>
       </div>

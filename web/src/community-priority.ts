@@ -1,480 +1,560 @@
 import * as echarts from "echarts";
-import { api } from "./api";
+
+export type RiskTier = "high" | "moderate" | "low";
 
 export interface CommunityPriorityResult {
     id: string;
     name: string;
     district: string;
-    riskLevel: string;
-    lst300: number | null;
-    lstP90_300: number | null;
-    lst500: number | null;
-    builtup300: number | null;
-    builtup500: number | null;
-    bldgCount300: number | null;
-    green300: number | null; // 0..1
-    green500: number | null; // 0..1
-    ndvi300: number | null;
-    ndvi500: number | null;
-    score: number; // 0 - 100
     rank: number;
     total: number;
-    tier: "critical" | "high" | "moderate" | "low";
+    score: number;
+    tier: RiskTier;
     tierLabel: string;
-    theme: "red" | "amber" | "emerald";
-    headlineReason: string;
-    actions: { step: number; title: string; detail: string; tag: string }[];
+    rawRiskLevel: string;
+    theme: "red" | "amber" | "teal";
+    lst300: number | null;
+    lst500: number | null;
+    lstP90_300: number | null;
+    builtup300: number | null;
+    builtup500: number | null;
+    greenRatio300: number | null;
+    greenRatio500: number | null;
+    ndvi300: number | null;
+    ndvi500: number | null;
+    bldgCount300: number | null;
+    primaryDriver: string;
+    simulationNote: string;
 }
 
-export const COMMUNITY_GLOSSARY: { code: string; name: string; desc: string }[] = [
-    {
-        code: "vulnerability_score",
-        name: "ดัชนีความเปราะบางความร้อนชุมชน (0–100 คะแนน)",
-        desc: "คะแนนรวมถ่วงน้ำหนักจาก 3 ปัจจัยหลัก: ความร้อนพื้นผิว (45%) + ความหนาแน่นอาคาร (30%) + การขาดแคลนพื้นที่สีเขียว (25%) ยิ่งสูงยิ่งต้องเข้าช่วยเหลือเร่งด่วน",
-    },
-    {
-        code: "lst_mean_300 / 500",
-        name: "อุณหภูมิพื้นผิวเฉลี่ยรัศมี 300 ม. และ 500 ม. (°C)",
-        desc: "อุณหภูมิพื้นผิวหลังคาและถนนรอบศูนย์กลางชุมชน รัศมี 300 ม. สะท้อนสภาพแวดล้อมระดับเดินเท้าในชุมชน ส่วน 500 ม. สะท้อนอิทธิพลความร้อนจากย่านข้างเคียง",
-    },
-    {
-        code: "lst_p90_300",
-        name: "อุณหภูมิพื้นผิวสูงสุดช่วงพีค (90th Percentile)",
-        desc: "ค่าความร้อนจัดในจุดที่ร้อนที่สุด 10% แรกของชุมชน ใช้ระบุจุดสะสมความร้อนวิกฤต (Hotspot) ที่เสี่ยงต่อสุขภาพผู้อยู่อาศัย",
-    },
-    {
-        code: "builtup_pct_300",
-        name: "ความหนาแน่นพื้นที่อาคาร (Building Coverage %)",
-        desc: "ร้อยละของพื้นที่ฐานอาคารต่อพื้นที่ทั้งหมด ยิ่งสูงแปลว่าอาคารปลูกสร้างชิดกันมาก ช่องว่างรับลมแคบ และสะสมความร้อนในเวลากลางวันสูง",
-    },
-    {
-        code: "green_ratio_300",
-        name: "สัดส่วนพื้นที่สีเขียวรอบชุมชน (%)",
-        desc: "ร้อยละของพื้นที่ปกคลุมด้วยเรือนยอดไม้และพืชพรรณ ยิ่งต่ำแปลว่าชุมชนขาดร่มเงาธรรมชาติและการคายระเหยน้ำช่วยลดอุณหภูมิ",
-    },
-    {
-        code: "ndvi_mean_300",
-        name: "ดัชนีพืชพรรณ (NDVI: -1 ถึง +1)",
-        desc: "ค่าความสมบูรณ์ของต้นไม้และพื้นที่สีเขียว ค่าต่ำกว่า 0.15 แสดงถึงสภาพแวดล้อมที่เป็นคอนกรีตและหลังคาหนาแน่น",
-    },
-];
+export interface TreeSimulationResult {
+    trees: number;
+    addedCanopySqm: number;
+    currentGreenPct: number;
+    simulatedGreenPct: number;
+    deltaGreenPct: number;
+    currentNdvi: number;
+    simulatedNdvi: number;
+    deltaNdvi: number;
+    currentScore: number;
+    simulatedScore: number;
+    deltaScore: number;
+    estimatedLstDelta: number;
+    simulatedLst300: number;
+}
 
-const num = (v: unknown): number | null => {
-    if (v == null || v === "" || Number.isNaN(Number(v))) return null;
-    return Number(v);
+const CANOPY_SQM_PER_TREE = 12;
+const RADIUS_300_AREA_SQM = Math.PI * 300 * 300;
+
+const numOrNull = (v: unknown): number | null => {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isNaN(n) ? null : n;
 };
 
-const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
-function analyzeSingleCommunity(
-    props: Record<string, unknown>,
-    allPropsList: Record<string, unknown>[]
-): CommunityPriorityResult {
-    const id = String(props.community_id || "CS341");
-    const name = String(props.name || id);
-    const district = String(props.district || "—");
-    const riskLevel = String(props.risk_level || "");
+const fmtNum = (v: number | null | undefined, d = 1) =>
+    v == null || Number.isNaN(v) ? "—" : v.toFixed(d);
 
-    const lst300 = num(props.lst_mean_300);
-    const lstP90_300 = num(props.lst_p90_300);
-    const lst500 = num(props.lst_mean_500);
-    const builtup300 = num(props.builtup_pct_300);
-    const builtup500 = num(props.builtup_pct_500);
-    const bldgCount300 = num(props.building_count_300);
-    const green300 = num(props.green_ratio_300);
-    const green500 = num(props.green_ratio_500);
-    const ndvi300 = num(props.ndvi_mean_300);
-    const ndvi500 = num(props.ndvi_mean_500);
+const escHtml = (s: unknown) =>
+    String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
-    // คำนวณคะแนนความเสี่ยงย่อย (0..1) เทียบกับเกณฑ์วิกฤตเมืองและค่าในกลุ่มชุมชน
-    const heatNorm = lst300 != null ? clamp01((lst300 - 34) / 11) : 0.5; // 34°C -> 0, 45°C -> 1
-    const densityNorm = builtup300 != null ? clamp01(builtup300 / 65) : 0.5; // 0% -> 0, 65% -> 1
-    const greenDeficitNorm =
-        green300 != null
-            ? clamp01(1 - green300 / 0.35) // เขียว >= 35% -> เสี่ยง 0, เขียว 0% -> เสี่ยง 1
-            : ndvi300 != null
-                ? clamp01((0.35 - ndvi300) / 0.35)
-                : 0.5;
+export function simulateTreeAddition(
+    c: Pick<CommunityPriorityResult, "lst300" | "builtup300" | "greenRatio300" | "ndvi300" | "score">,
+    trees: number
+): TreeSimulationResult {
+    const safeTrees = Math.max(0, Math.round(trees));
+    const addedCanopySqm = safeTrees * CANOPY_SQM_PER_TREE;
+    const addedGreenRatio = addedCanopySqm / RADIUS_300_AREA_SQM;
 
-    const rawScore = (heatNorm * 0.45 + densityNorm * 0.30 + greenDeficitNorm * 0.25) * 100;
-    const score = Math.round(rawScore * 10) / 10;
+    const baseGreenRatio = clamp(c.greenRatio300 ?? 0.2, 0, 0.95);
+    const simGreenRatio = clamp(baseGreenRatio + addedGreenRatio, 0, 0.98);
+    const currentGreenPct = baseGreenRatio * 100;
+    const simulatedGreenPct = simGreenRatio * 100;
+    const deltaGreenPct = simulatedGreenPct - currentGreenPct;
 
-    let tier: CommunityPriorityResult["tier"] = "moderate";
-    let tierLabel = "ปานกลาง · เฝ้าระวัง";
-    let theme: CommunityPriorityResult["theme"] = "amber";
+    const baseNdvi = clamp(c.ndvi300 ?? 0.25, -0.2, 0.9);
+    const simNdvi = clamp(baseNdvi + addedGreenRatio * 0.85, -0.2, 0.95);
+    const deltaNdvi = simNdvi - baseNdvi;
 
-    if (score >= 72 || riskLevel === "high") {
-        if (score >= 80) {
-            tier = "critical";
-            tierLabel = "วิกฤตเร่งด่วนสูงสุด (Priority 1)";
-            theme = "red";
-        } else {
-            tier = "high";
-            tierLabel = "เปราะบางสูง · ควรช่วยเหลือก่อน";
-            theme = "red";
-        }
-    } else if (score < 45 && riskLevel !== "medium") {
-        tier = "low";
-        tierLabel = "ความเสี่ยงต่ำ · ต้นแบบพื้นที่สีเขียว";
-        theme = "emerald";
-    }
+    const currentScore = c.score;
+    // คะแนนความเปราะบางลดลงตามสัดส่วนพื้นที่สีเขียวที่จำลองเพิ่มขึ้น (ค่าสมมติเพื่อเปรียบเทียบ)
+    const scoreReduction = clamp(deltaGreenPct * 1.4, 0, 18);
+    const simulatedScore = Math.round(clamp(currentScore - scoreReduction, 0, 100));
+    const deltaScore = simulatedScore - currentScore;
 
-    // วิเคราะห์สาเหตุหลักเชิงกายภาพของชุมชน
-    const reasons: string[] = [];
-    if (lst300 != null && lst300 >= 40) reasons.push(`อุณหภูมิพื้นผิวสูงจัด (${lst300.toFixed(1)} °C)`);
-    if (builtup300 != null && builtup300 >= 40) reasons.push(`อาคารหนาแน่นมาก (${builtup300.toFixed(1)}%)`);
-    if (green300 != null && green300 < 0.12) reasons.push(`พื้นที่สีเขียวน้อยมาก (${(green300 * 100).toFixed(1)}%)`);
-    const headlineReason =
-        reasons.length > 0
-            ? reasons.join(" + ")
-            : "สภาพแวดล้อมความร้อนและสิ่งปลูกสร้างอยู่ในระดับปานกลาง";
-
-    // สร้างลำดับคำแนะนำเชิงออกแบบและผังเมือง (Urban Design & Planning Actions)
-    const actions: { step: number; title: string; detail: string; tag: string }[] = [];
-
-    if ((green300 != null && green300 < 0.15) || (ndvi300 != null && ndvi300 < 0.18)) {
-        actions.push({
-            step: 1,
-            tag: "Green Infrastructure",
-            title: "เพิ่มร่มเงาและพื้นที่สีเขียวแทรกซึม (Pocket Park & Tree Canopy)",
-            detail: `พื้นที่สีเขียวปัจจุบันมีเพียง ${green300 != null ? (green300 * 100).toFixed(1) + "%" : "ระดับต่ำ"} ควรปลูกไม้ยืนต้นให้ร่มเงาตามแนวทางเดินหลัก ลานกิจกรรมชุมชน และใช้ไม้เลื้อย/ผนังสีเขียวในจุดที่พื้นที่จำกัด`,
-        });
-    }
-
-    if (builtup300 != null && builtup300 >= 38) {
-        actions.push({
-            step: actions.length + 1,
-            tag: "Urban Ventilation & Cool Roof",
-            title: "เปิดช่องทางลมและลดความร้อนแผ่รังสีจากหลังคา (Cool Roof & Wind Corridor)",
-            detail: `ความหนาแน่นอาคารสูงถึง ${builtup300.toFixed(1)}% (${bldgCount300 ?? "—"} หลัง) ทำให้ลมระบายยาก ควรทาสีสะท้อนความร้อนบนหลังคาสังกะสี/คอนกรีต และรักษาแนวซอยหรือช่องว่างระหว่างอาคารไม่ให้ต่อเติมปิดทางลม`,
-        });
-    }
-
-    if (lst300 != null && lst300 >= 39) {
-        actions.push({
-            step: actions.length + 1,
-            tag: "Public Health & Cooling Node",
-            title: "จัดตั้งจุดพักคอยคลายร้อนและลดพื้นผิวดาดแข็ง (Cooling Shelter)",
-            detail: `อุณหภูมิพื้นผิวเฉลี่ย ${lst300.toFixed(2)} °C (พีคสุด ${lstP90_300?.toFixed(2) ?? "—"} °C) ควรจัดจุดพักร่มเงาพร้อมน้ำดื่มสำหรับผู้สูงอายุและเด็กเล็กในช่วง 10:00–15:00 น. และเปลี่ยนพื้นคอนกรีตลานชุมชนเป็นบล็อกปูพื้นซึมน้ำได้`,
-        });
-    }
-
-    if (lst500 != null && lst300 != null && lst500 > lst300 + 0.5) {
-        actions.push({
-            step: actions.length + 1,
-            tag: "Buffer Zone",
-            title: "สร้างแนวกันชนความร้อนจากย่านรอบนอก (500 m Edge Buffer)",
-            detail: `พื้นที่รอบนอก 500 ม. ร้อนกว่าใจกลางชุมชน (${lst500.toFixed(2)} °C vs ${lst300.toFixed(2)} °C) ควรปลูกแนวไม้พุ่มและต้นไม้สูงตามขอบชุมชนฝั่งติดถนนใหญ่เพื่อกรองความร้อนและฝุ่น`,
-        });
-    }
-
-    if (actions.length === 0) {
-        actions.push({
-            step: 1,
-            tag: "Conservation & Monitoring",
-            title: "รักษาสัดส่วนพื้นที่สีเขียวและเฝ้าระวังจุดร้อนเฉพาะจุด",
-            detail:
-                "ชุมชนมีสภาพแวดล้อมค่อนข้างสมดุล ควรอนุรักษ์เรือนยอดไม้เดิมและควบคุมไม่ให้ความหนาแน่นอาคารเพิ่มขึ้นจนปิดกั้นทางลม",
-        });
-    }
+    // สมมติฐานเชิงจำลอง: ลดลงเล็กน้อยตามสัดส่วนสีเขียวที่เพิ่ม (ระบุชัดว่าเป็นค่าสมมติ)
+    const estimatedLstDelta = -Number(clamp(deltaGreenPct * 0.08, 0, 0.8).toFixed(2));
+    const simulatedLst300 =
+        c.lst300 != null ? Number((c.lst300 + estimatedLstDelta).toFixed(2)) : 0;
 
     return {
-        id,
-        name,
-        district,
-        riskLevel,
-        lst300,
-        lstP90_300,
-        lst500,
-        builtup300,
-        builtup500,
-        bldgCount300,
-        green300,
-        green500,
-        ndvi300,
-        ndvi500,
-        score,
-        rank: 1,
-        total: Math.max(1, allPropsList.length),
-        tier,
-        tierLabel,
-        theme,
-        headlineReason,
-        actions: actions.slice(0, 3),
+        trees: safeTrees,
+        addedCanopySqm,
+        currentGreenPct,
+        simulatedGreenPct,
+        deltaGreenPct,
+        currentNdvi: baseNdvi,
+        simulatedNdvi: simNdvi,
+        deltaNdvi,
+        currentScore,
+        simulatedScore,
+        deltaScore,
+        estimatedLstDelta,
+        simulatedLst300,
     };
 }
 
-export function evaluateAllCommunities(features: GeoJSON.Feature[]): CommunityPriorityResult[] {
-    const propsList = features.map((f) => (f.properties || {}) as Record<string, unknown>);
-    const results = propsList.map((p) => analyzeSingleCommunity(p, propsList));
-    results.sort((a, b) => b.score - a.score);
-    results.forEach((item, idx) => {
-        item.rank = idx + 1;
-        item.total = results.length;
+export function evaluateAllCommunities(
+    features: { properties?: Record<string, unknown> | null }[]
+): CommunityPriorityResult[] {
+    const parsed = features.map((f, idx) => {
+        const p = f.properties || {};
+        const id = String(p.community_id || `COMM-${idx + 1}`);
+        const name = String(p.name || id);
+        const district = String(p.district || "—");
+        const rawRiskLevel = String(p.risk_level || "").toLowerCase();
+
+        const lst300 = numOrNull(p.lst_mean_300);
+        const lst500 = numOrNull(p.lst_mean_500);
+        const lstP90_300 = numOrNull(p.lst_p90_300);
+        const builtup300 = numOrNull(p.builtup_pct_300);
+        const builtup500 = numOrNull(p.builtup_pct_500);
+
+        let greenRatio300 = numOrNull(p.green_ratio_300);
+        if (greenRatio300 != null && greenRatio300 > 1) greenRatio300 = greenRatio300 / 100;
+
+        let greenRatio500 = numOrNull(p.green_ratio_500);
+        if (greenRatio500 != null && greenRatio500 > 1) greenRatio500 = greenRatio500 / 100;
+
+        const ndvi300 = numOrNull(p.ndvi_mean_300);
+        const ndvi500 = numOrNull(p.ndvi_mean_500);
+        const bldgCount300 = numOrNull(p.building_count_300);
+
+        // คะแนนความเปราะบาง (0-100): ความร้อนพื้นผิว (40%) + ความหนาแน่นอาคาร (30%) + ความขาดแคลนพื้นที่สีเขียว (30%)
+        const heatNorm = lst300 != null ? clamp(((lst300 - 34) / 14) * 100, 0, 100) : 50;
+        const bldgNorm = builtup300 != null ? clamp((builtup300 / 60) * 100, 0, 100) : 45;
+        const greenDeficitNorm =
+            greenRatio300 != null ? clamp((1 - clamp(greenRatio300 / 0.5, 0, 1)) * 100, 0, 100) : 50;
+
+        let score = Math.round(heatNorm * 0.4 + bldgNorm * 0.3 + greenDeficitNorm * 0.3);
+        if (rawRiskLevel === "high") score = Math.max(score, 68);
+        if (rawRiskLevel === "low") score = Math.min(score, 54);
+        score = clamp(score, 0, 100);
+
+        let tier: RiskTier = "moderate";
+        let tierLabel = "ความเปราะบางปานกลาง (ควรเฝ้าระวัง)";
+        let theme: "red" | "amber" | "teal" = "amber";
+        if (score >= 65 || rawRiskLevel === "high") {
+            tier = "high";
+            tierLabel = "ความเปราะบางสูง (ควรพิจารณาก่อน)";
+            theme = "red";
+        } else if (score < 50 || rawRiskLevel === "low") {
+            tier = "low";
+            tierLabel = "ความเปราะบางต่ำกว่าเกณฑ์";
+            theme = "teal";
+        }
+
+        const drivers: { label: string; val: number }[] = [
+            { label: `อุณหภูมิพื้นผิวเฉลี่ย (${fmtNum(lst300, 2)} °C)`, val: heatNorm },
+            { label: `ความหนาแน่นอาคาร (${fmtNum(builtup300, 1)}%)`, val: bldgNorm },
+            {
+                label: `สัดส่วนพื้นที่สีเขียวต่ำ (${greenRatio300 != null ? fmtNum(greenRatio300 * 100, 1) + "%" : "—"})`,
+                val: greenDeficitNorm,
+            },
+        ].sort((a, b) => b.val - a.val);
+
+        const primaryDriver = `ปัจจัยเด่นในดัชนี: ${drivers[0].label}`;
+
+        const simulationNote =
+            "หมายเหตุ: ข้อมูลนี้ประเมินจากตัวแปรเชิงพื้นที่และดาวเทียม ยังไม่ได้สำรวจหน้างานจริง ตัวเลขการเพิ่มต้นไม้เป็น 'ค่าสมมติเชิงจำลอง' เพื่อเปรียบเทียบสัดส่วนพื้นที่สีเขียว";
+
+        return {
+            id,
+            name,
+            district,
+            rank: 0,
+            total: features.length,
+            score,
+            tier,
+            tierLabel,
+            rawRiskLevel,
+            theme,
+            lst300,
+            lst500,
+            lstP90_300,
+            builtup300,
+            builtup500,
+            greenRatio300,
+            greenRatio500,
+            ndvi300,
+            ndvi500,
+            bldgCount300,
+            primaryDriver,
+            simulationNote,
+        };
     });
-    return results;
+
+    parsed.sort((a, b) => b.score - a.score);
+    parsed.forEach((item, i) => {
+        item.rank = i + 1;
+        item.total = parsed.length;
+    });
+
+    return parsed;
 }
 
-export function buildCommunityPriorityHtml(item: CommunityPriorityResult): string {
-    const actionCards = item.actions
+export function buildCommunitySimulationHtml(
+    c: CommunityPriorityResult,
+    defaultTrees = 30
+): string {
+    const treeChoices = [10, 20, 30, 40, 50];
+    const sim = simulateTreeAddition(c, defaultTrees);
+    const badgeClass = c.tier === "high" ? "danger" : c.tier === "moderate" ? "warn" : "cool";
+
+    const buttonsHtml = treeChoices
         .map(
-            (a) => `
-      <div class="prio-step">
-        <div class="prio-step-head">
-          <span class="prio-num">แนวทางที่ ${a.step}</span>
-          <span class="prio-tag">${a.tag}</span>
-        </div>
-        <strong>${a.title}</strong>
-        <p>${a.detail}</p>
-      </div>`
+            (n) =>
+                `<button type="button" class="mini-btn ${n === defaultTrees ? "active" : ""}" data-sim-trees="${n}">+${n} ต้น</button>`
         )
-        .join("");
+        .join(" ");
 
     return `
-    <div class="prio-box tier-${item.tier}">
-      <div class="prio-top">
+    <div class="d-card">
+      <div class="verdict-top">
         <div>
-          <span class="prio-rank-badge">ลำดับความเร่งด่วนที่ #${item.rank} จาก ${item.total} ชุมชน</span>
-          <div class="prio-tier-title">${item.tierLabel}</div>
-        </div>
-        <div class="prio-score-circle">
-          <b>${item.score.toFixed(0)}</b>
-          <span>/100</span>
+          <div class="d-kpis" style="grid-template-columns: 1fr 1fr; margin-bottom: 6px;">
+            <div class="d-kpi ${c.theme === "red" ? "warm" : c.theme === "amber" ? "amber" : "cool"}">
+              <div class="lbl">คะแนนความเปราะบาง</div>
+              <div class="val">${c.score} / 100</div>
+              <div class="sub">อันดับ #${c.rank} จาก ${c.total} ชุมชน</div>
+            </div>
+            <div class="d-kpi blue">
+              <div class="lbl">สถานะในชั้นข้อมูล</div>
+              <div class="val" style="font-size:14px;">${escHtml(c.rawRiskLevel || "—")}</div>
+              <div class="sub">สีวงกลม = ความเปราะบาง ไม่ใช่ °C</div>
+            </div>
+          </div>
+          <span class="v-pill ${badgeClass}">${escHtml(c.tierLabel)}</span>
         </div>
       </div>
-      <div class="prio-reason">
-        <b>สาเหตุความเปราะบางหลัก:</b> ${item.headlineReason}
+      <p class="note" style="margin-top:8px;"><b>${escHtml(c.primaryDriver)}</b></p>
+      <p class="note" style="margin-top:4px;">${escHtml(c.simulationNote)}</p>
+    </div>
+
+    <div class="d-card" id="comm-sim-box">
+      <h4>🧪 จำลองสมมติฐานการเพิ่มต้นไม้ (ค่าสมมติ — ยังไม่ลงพื้นที่จริง)</h4>
+      <p class="note">เลือกจำนวนต้นไม้ที่สมมติว่าจะเพิ่มในชุมชน (สมมติเรือนยอด ~${CANOPY_SQM_PER_TREE} ตร.ม./ต้น ในรัศมี 300 ม.):</p>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 10px;" id="comm-sim-btns">
+        ${buttonsHtml}
       </div>
-      <div class="prio-actions-wrap">
-        <div class="prio-sec-title">🧭 ลำดับการแก้ไขเชิงออกแบบและผังเมือง (แนะนำทำก่อน → หลัง)</div>
-        ${actionCards}
+      <div id="comm-sim-result">
+        ${renderSimulationSummary(sim)}
       </div>
     </div>
   `;
 }
 
-/**
- * ควบคุมหน้าวิเคราะห์และจัดลำดับความเปราะบางของชุมชนใน Tab 2 (โหมด CS341)
- */
+function renderSimulationSummary(s: TreeSimulationResult): string {
+    return `
+    <div class="d-kpis" style="grid-template-columns: 1fr 1fr; margin-bottom:8px;">
+      <div class="d-kpi cool">
+        <div class="lbl">พื้นที่สีเขียว (ค่าสมมติ +${s.trees} ต้น)</div>
+        <div class="val">${s.simulatedGreenPct.toFixed(2)} %</div>
+        <div class="sub">เดิม ${s.currentGreenPct.toFixed(2)}% (เพิ่ม +${s.deltaGreenPct.toFixed(2)}% · ~${s.addedCanopySqm} ตร.ม.)</div>
+      </div>
+      <div class="d-kpi amber">
+        <div class="lbl">คะแนนเปราะบาง (ค่าสมมติ)</div>
+        <div class="val">${s.simulatedScore} / 100</div>
+        <div class="sub">เดิม ${s.currentScore} (${s.deltaScore <= 0 ? s.deltaScore : "+" + s.deltaScore} คะแนน)</div>
+      </div>
+    </div>
+    <table class="d-table">
+      <thead>
+        <tr>
+          <th>ตัวแปร</th>
+          <th>ปัจจุบัน</th>
+          <th>ค่าสมมติ (+${s.trees} ต้น)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>สัดส่วนพื้นที่สีเขียว</td>
+          <td>${s.currentGreenPct.toFixed(2)} %</td>
+          <td><b>${s.simulatedGreenPct.toFixed(2)} %</b> (+${s.deltaGreenPct.toFixed(2)}%)</td>
+        </tr>
+        <tr>
+          <td>ดัชนี NDVI (จำลอง)</td>
+          <td>${s.currentNdvi.toFixed(3)}</td>
+          <td><b>${s.simulatedNdvi.toFixed(3)}</b> (+${s.deltaNdvi.toFixed(3)})</td>
+        </tr>
+        <tr>
+          <td>LST 300 ม. (ผลคาดการณ์สมมติ)</td>
+          <td>${s.simulatedLst300 ? (s.simulatedLst300 - s.estimatedLstDelta).toFixed(2) + " °C" : "—"}</td>
+          <td><b>${s.simulatedLst300 ? s.simulatedLst300.toFixed(2) + " °C" : "—"}</b> (${s.estimatedLstDelta} °C)</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="note" style="margin-top:6px;">⚠️ <b>ค่าสมมติเท่านั้น:</b> ตัวเลขนี้เป็นแบบจำลองทางคณิตศาสตร์เบื้องต้น ไม่ใช่ผลการตรวจวัดจริงหรือคำสั่งออกแบบหน้างาน ควรลงพื้นที่สำรวจสภาพซอยจริงก่อนตัดสินใจ</p>
+  `;
+}
+
+export function bindCommunitySimulationEvents(
+    container: HTMLElement | null,
+    c: CommunityPriorityResult
+): void {
+    if (!container) return;
+    const btns = Array.from(container.querySelectorAll<HTMLButtonElement>("[data-sim-trees]"));
+    const resultEl = container.querySelector<HTMLElement>("#comm-sim-result");
+    if (!resultEl) return;
+
+    btns.forEach((btn) => {
+        btn.onclick = () => {
+            const trees = Number(btn.dataset.simTrees || 30);
+            btns.forEach((b) => b.classList.toggle("active", b === btn));
+            resultEl.innerHTML = renderSimulationSummary(simulateTreeAddition(c, trees));
+        };
+    });
+}
+
 export class CommunityStatsController {
-    private cached: CommunityPriorityResult[] = [];
+    private items: CommunityPriorityResult[] = [];
+    private selectedId: string | null = null;
+    private selectedTrees = 30;
     private barChart: echarts.ECharts | null = null;
     private scatterChart: echarts.ECharts | null = null;
-    private selectedDistrict = "all";
-    private selectedTier = "all";
+    private onJumpToMap?: (communityId: string) => void;
 
-    async render() {
-        const kpiBox = document.getElementById("cs341-kpis");
+    setJumpHandler(handler: (communityId: string) => void) {
+        this.onJumpToMap = handler;
+    }
+
+    setCommunities(features: { properties?: Record<string, unknown> | null }[]) {
+        this.items = evaluateAllCommunities(features);
+        if (!this.selectedId && this.items.length > 0) {
+            this.selectedId = this.items[0].id;
+        }
+        this.render();
+    }
+
+    render() {
+        const kpisEl = document.getElementById("cs341-kpis");
+        const spotlightEl = document.getElementById("cs341-top-spotlight");
         const tbody = document.getElementById("cs341-ranking-body");
-        const spotlight = document.getElementById("cs341-top-spotlight");
-        if (!kpiBox || !tbody) return;
+        const distSel = document.getElementById("cs341-filter-district") as HTMLSelectElement | null;
+        const tierSel = document.getElementById("cs341-filter-tier") as HTMLSelectElement | null;
+        const simPanelEl = document.getElementById("cs341-sim-dashboard");
 
-        if (!this.cached.length) {
-            try {
-                const fc = await api<GeoJSON.FeatureCollection>("/community");
-                this.cached = evaluateAllCommunities(fc.features || []);
-            } catch {
-                tbody.innerHTML = `<tr><td colspan="7" class="err">ไม่สามารถโหลดข้อมูลชุมชนจาก /community ได้</td></tr>`;
-                return;
-            }
+        if (!kpisEl || !tbody) return;
+
+        if (!this.items.length) {
+            kpisEl.innerHTML = `<div class="card"><p class="note">กำลังรอข้อมูลชุมชนจากระบบ (<code>/community</code>)…</p></div>`;
+            tbody.innerHTML = "";
+            if (spotlightEl) spotlightEl.innerHTML = "";
+            if (simPanelEl) simPanelEl.innerHTML = "";
+            return;
         }
 
-        // เติมตัวเลือกเขตอัตโนมัติ
-        const distSel = document.getElementById("cs341-filter-district") as HTMLSelectElement | null;
         if (distSel && distSel.options.length <= 1) {
-            const districts = Array.from(new Set(this.cached.map((c) => c.district).filter((d) => d && d !== "—")));
+            const districts = Array.from(new Set(this.items.map((x) => x.district).filter((d) => d && d !== "—")));
             districts.forEach((d) => {
                 const opt = document.createElement("option");
                 opt.value = d;
                 opt.textContent = `เขต${d}`;
                 distSel.appendChild(opt);
             });
-            distSel.onchange = () => {
-                this.selectedDistrict = distSel.value;
-                this.renderFiltered();
-            };
+            distSel.onchange = () => this.renderRowsAndCharts();
+        }
+        if (tierSel && !tierSel.onchange) {
+            tierSel.onchange = () => this.renderRowsAndCharts();
         }
 
-        const tierSel = document.getElementById("cs341-filter-tier") as HTMLSelectElement | null;
-        if (tierSel) {
-            tierSel.onchange = () => {
-                this.selectedTier = tierSel.value;
-                this.renderFiltered();
-            };
-        }
+        const highCount = this.items.filter((x) => x.tier === "high").length;
+        const avgScore = Math.round(this.items.reduce((s, x) => s + x.score, 0) / this.items.length);
+        const top1 = this.items[0];
 
-        // สรุป KPI ภาพรวมทั้งหมด
-        const criticalCount = this.cached.filter((c) => c.tier === "critical" || c.tier === "high").length;
-        const avgLst =
-            this.cached.reduce((s, c) => s + (c.lst300 ?? 0), 0) / Math.max(1, this.cached.filter((c) => c.lst300 != null).length);
-        const avgBuiltup =
-            this.cached.reduce((s, c) => s + (c.builtup300 ?? 0), 0) /
-            Math.max(1, this.cached.filter((c) => c.builtup300 != null).length);
-        const avgGreen =
-            (this.cached.reduce((s, c) => s + (c.green300 ?? 0), 0) /
-                Math.max(1, this.cached.filter((c) => c.green300 != null).length)) *
-            100;
-
-        kpiBox.innerHTML = `
-      <div class="kpi live-kpi warm">
-        <div class="l">ชุมชนเสี่ยงสูง/วิกฤต (ต้องช่วยก่อน)</div>
-        <div class="v" style="color:#dc2626;">${criticalCount} / ${this.cached.length} แห่ง</div>
-        <div class="l">คะแนนความเปราะบาง ≥ 72</div>
-      </div>
-      <div class="kpi live-kpi amber">
-        <div class="l">อุณหภูมิพื้นผิวเฉลี่ยชุมชน (300 ม.)</div>
-        <div class="v">${avgLst.toFixed(2)} °C</div>
-        <div class="l">สูงสุด: ${this.cached[0]?.lst300?.toFixed(2) ?? "—"} °C</div>
-      </div>
-      <div class="kpi live-kpi indigo">
-        <div class="l">ความหนาแน่นอาคารเฉลี่ย (300 ม.)</div>
-        <div class="v">${avgBuiltup.toFixed(1)} %</div>
-        <div class="l">สะท้อนการบังลมและมวลความร้อน</div>
-      </div>
-      <div class="kpi" style="border-top-color:#10b981;">
-        <div class="l">สัดส่วนพื้นที่สีเขียวเฉลี่ย</div>
-        <div class="v" style="color:#059669;">${avgGreen.toFixed(1)} %</div>
-        <div class="l">เกณฑ์แนะนำเมืองเย็น ≥ 25–30%</div>
-      </div>
+        kpisEl.innerHTML = `
+      <div class="kpi"><div class="l">ชุมชนทั้งหมด</div><div class="v">${this.items.length}</div><div class="l">จัดอันดับตามคะแนนความเปราะบาง</div></div>
+      <div class="kpi"><div class="l">กลุ่มเปราะบางสูง</div><div class="v">${highCount}</div><div class="l">สีวงกลม = ความเปราะบาง (ไม่ใช่ °C)</div></div>
+      <div class="kpi"><div class="l">คะแนนความเปราะบางเฉลี่ย</div><div class="v">${avgScore}</div><div class="l">จาก 100 คะแนน (ค่าสมมติเชิงดัชนี)</div></div>
+      <div class="kpi"><div class="l">อันดับ #1 ปัจจุบัน</div><div class="v" style="font-size:15px;">${escHtml(top1.name)}</div><div class="l">คะแนน ${top1.score}/100 · LST ${fmtNum(top1.lst300, 1)} °C</div></div>
     `;
 
-        // การ์ดไฮไลต์ Top 3 ชุมชนที่ควรเข้าช่วยเหลือก่อน
-        if (spotlight) {
-            const top3 = this.cached.slice(0, 3);
-            spotlight.innerHTML = top3
+        if (spotlightEl) {
+            spotlightEl.innerHTML = this.items
+                .slice(0, 3)
                 .map(
                     (c) => `
-        <div class="tk-card ${c.rank === 1 ? "red" : "amber"}">
-          <div class="tk-title">อันดับ #${c.rank} · เขต${c.district} · คะแนน ${c.score.toFixed(0)}/100</div>
-          <div class="tk-val">${c.name}</div>
-          <p><b>ปัญหาหลัก:</b> ${c.headlineReason}</p>
-          <p style="margin-top:5px;"><b>แก้ด่วนอันดับ 1:</b> ${c.actions[0]?.title || "เพิ่มร่มเงาและลดความร้อนพื้นผิว"}</p>
-        </div>`
+          <div class="card" style="padding:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <b>#${c.rank} ${escHtml(c.name)}</b>
+              <span class="v-pill ${c.tier === "high" ? "danger" : c.tier === "moderate" ? "warn" : "cool"}">${c.score}/100</span>
+            </div>
+            <p class="note" style="margin:6px 0;">เขต${escHtml(c.district)} · LST ${fmtNum(c.lst300, 2)} °C · สีเขียว ${c.greenRatio300 != null ? fmtNum(c.greenRatio300 * 100, 1) + "%" : "—"}</p>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button type="button" class="mini-btn" data-jump-comm="${escHtml(c.id)}">🗺️ ไปที่ชุมชนบนแผนที่</button>
+              <button type="button" class="mini-btn" data-sim-comm="${escHtml(c.id)}">🧪 จำลองเพิ่มต้นไม้</button>
+            </div>
+          </div>`
                 )
                 .join("");
         }
 
-        this.renderCharts();
-        this.renderFiltered();
-        this.renderGlossary();
+        this.renderRowsAndCharts();
+        this.renderSimulationDashboard();
     }
 
-    private renderFiltered() {
+    private renderSimulationDashboard() {
+        const simPanelEl = document.getElementById("cs341-sim-dashboard");
+        if (!simPanelEl) return;
+
+        const target = this.items.find((x) => x.id === this.selectedId) || this.items[0];
+        if (!target) return;
+
+        const sim = simulateTreeAddition(target, this.selectedTrees);
+        const choices = [10, 20, 30, 40, 50];
+
+        simPanelEl.innerHTML = `
+      <div class="card" style="margin-bottom:12px;">
+        <h3>
+          <span>🧪 Dashboard เปรียบเทียบ: ปัจจุบัน vs ค่าสมมติการเพิ่มต้นไม้ (${escHtml(target.name)})</span>
+          <button type="button" class="mini-btn" data-jump-comm="${escHtml(target.id)}">🗺️ เปิดตำแหน่งบนแผนที่</button>
+        </h3>
+        <p class="note">
+          <b>คำชี้แจง:</b> ระบบไม่ได้ลงพื้นที่จริง ตัวเลขด้านล่างเป็น <b>"ค่าสมมติเชิงจำลอง"</b> เมื่อเลือกเพิ่มต้นไม้ 10–50 ต้น (สมมติเรือนยอด ~${CANOPY_SQM_PER_TREE} ตร.ม./ต้น ในรัศมี 300 ม.) เพื่อดูการเปลี่ยนแปลงของสัดส่วนพื้นที่สีเขียวและคะแนนความเปราะบาง
+        </p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin:10px 0;">
+          ${choices
+                .map(
+                    (n) =>
+                        `<button type="button" class="mini-btn ${n === this.selectedTrees ? "active" : ""}" data-dash-trees="${n}">ปลูกสมมติ ${n} ต้น</button>`
+                )
+                .join("")}
+        </div>
+        ${renderSimulationSummary(sim)}
+      </div>
+    `;
+
+        simPanelEl.querySelectorAll<HTMLButtonElement>("[data-dash-trees]").forEach((btn) => {
+            btn.onclick = () => {
+                this.selectedTrees = Number(btn.dataset.dashTrees || 30);
+                this.renderSimulationDashboard();
+            };
+        });
+
+        simPanelEl.querySelectorAll<HTMLButtonElement>("[data-jump-comm]").forEach((btn) => {
+            btn.onclick = () => {
+                const id = btn.dataset.jumpComm;
+                if (id && this.onJumpToMap) this.onJumpToMap(id);
+            };
+        });
+    }
+
+    private renderRowsAndCharts() {
         const tbody = document.getElementById("cs341-ranking-body");
+        const distSel = document.getElementById("cs341-filter-district") as HTMLSelectElement | null;
+        const tierSel = document.getElementById("cs341-filter-tier") as HTMLSelectElement | null;
         if (!tbody) return;
 
-        const list = this.cached.filter((c) => {
-            if (this.selectedDistrict !== "all" && c.district !== this.selectedDistrict) return false;
-            if (this.selectedTier === "high" && c.tier !== "critical" && c.tier !== "high") return false;
-            if (this.selectedTier === "moderate" && c.tier !== "moderate") return false;
-            if (this.selectedTier === "low" && c.tier !== "low") return false;
+        const dFilter = distSel?.value || "all";
+        const tFilter = tierSel?.value || "all";
+
+        const filtered = this.items.filter((x) => {
+            if (dFilter !== "all" && x.district !== dFilter) return false;
+            if (tFilter !== "all" && x.tier !== tFilter) return false;
             return true;
         });
 
-        tbody.innerHTML = list
+        tbody.innerHTML = filtered
             .map((c) => {
-                const pillCls = c.tier === "critical" || c.tier === "high" ? "danger" : c.tier === "moderate" ? "warn" : "cool";
-                const actionSummary = c.actions
-                    .map((a, idx) => `<div><b>${idx + 1}.</b> ${a.title}</div>`)
-                    .join("");
-                return `
-          <tr>
-            <td><b>#${c.rank}</b></td>
-            <td>
-              <b>${c.name}</b><br>
-              <small>เขต${c.district} · <code>${c.id}</code></small>
-            </td>
-            <td>
-              <span class="v-pill ${pillCls}">${c.tierLabel}</span><br>
-              <small>คะแนน <b>${c.score.toFixed(0)}</b>/100</small>
-            </td>
-            <td><b>${c.lst300 != null ? c.lst300.toFixed(2) + " °C" : "—"}</b><br><small>พีค ${c.lstP90_300?.toFixed(1) ?? "—"} °C</small></td>
-            <td>${c.builtup300 != null ? c.builtup300.toFixed(1) + "%" : "—"}<br><small>${c.bldgCount300 ?? "—"} หลัง</small></td>
-            <td>${c.green300 != null ? (c.green300 * 100).toFixed(1) + "%" : "—"}<br><small>NDVI ${c.ndvi300?.toFixed(2) ?? "—"}</small></td>
-            <td style="font-size:12px; line-height:1.45;">${actionSummary}</td>
-          </tr>
-        `;
+                const pillClass = c.tier === "high" ? "danger" : c.tier === "moderate" ? "warn" : "cool";
+                return `<tr>
+          <td><b>#${c.rank}</b> <span class="note">(${c.score}/100)</span></td>
+          <td><b>${escHtml(c.name)}</b><br><span class="note">เขต${escHtml(c.district)} · ${escHtml(c.id)}</span></td>
+          <td><span class="v-pill ${pillClass}">${escHtml(c.rawRiskLevel || c.tier)}</span><br><span class="note">สีวงกลม = ความเปราะบาง</span></td>
+          <td><b>${fmtNum(c.lst300, 2)} °C</b></td>
+          <td>${fmtNum(c.builtup300, 1)} %</td>
+          <td>${c.greenRatio300 != null ? fmtNum(c.greenRatio300 * 100, 1) + " %" : "—"}</td>
+          <td>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button type="button" class="mini-btn" data-jump-comm="${escHtml(c.id)}">🗺️ ดูบนแผนที่</button>
+              <button type="button" class="mini-btn" data-sim-comm="${escHtml(c.id)}">🧪 จำลองต้นไม้</button>
+            </div>
+            <div class="note" style="margin-top:4px;">${escHtml(c.primaryDriver)} (ค่าสมมติ)</div>
+          </td>
+        </tr>`;
             })
             .join("");
-    }
 
-    private renderCharts() {
-        const top10 = this.cached.slice(0, 10).reverse();
+        document.querySelectorAll<HTMLButtonElement>("[data-jump-comm]").forEach((btn) => {
+            btn.onclick = () => {
+                const id = btn.dataset.jumpComm;
+                if (id && this.onJumpToMap) this.onJumpToMap(id);
+            };
+        });
+
+        document.querySelectorAll<HTMLButtonElement>("[data-sim-comm]").forEach((btn) => {
+            btn.onclick = () => {
+                const id = btn.dataset.simComm;
+                if (id) {
+                    this.selectedId = id;
+                    this.renderSimulationDashboard();
+                    document.getElementById("cs341-sim-dashboard")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                }
+            };
+        });
+
         const barEl = document.getElementById("cs341-c-bar");
         if (barEl) {
-            if (!this.barChart) {
-                this.barChart = echarts.init(barEl);
-                new ResizeObserver(() => this.barChart?.resize()).observe(barEl);
-            }
+            if (!this.barChart) this.barChart = echarts.init(barEl);
+            const top10 = this.items.slice(0, 10).reverse();
             this.barChart.setOption({
-                tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
-                grid: { left: 135, right: 24, top: 16, bottom: 26 },
-                xAxis: { type: "value", max: 100, name: "คะแนน" },
-                yAxis: {
-                    type: "category",
-                    data: top10.map((c) => `#${c.rank} ${c.name.slice(0, 18)}`),
-                    axisLabel: { fontSize: 11 },
-                },
-                series: [
-                    {
-                        name: "ดัชนีความเปราะบาง",
-                        type: "bar",
-                        data: top10.map((c) => ({
-                            value: c.score,
-                            itemStyle: {
-                                color: c.score >= 80 ? "#dc2626" : c.score >= 72 ? "#f97316" : "#eab308",
-                                borderRadius: [0, 4, 4, 0],
-                            },
-                        })),
-                        label: { show: true, position: "right", formatter: "{c}" },
-                    },
-                ],
+                tooltip: { trigger: "axis" },
+                grid: { left: 120, right: 20, top: 16, bottom: 24 },
+                xAxis: { type: "value", max: 100 },
+                yAxis: { type: "category", data: top10.map((x) => x.name), axisLabel: { fontSize: 11 } },
+                series: [{ type: "bar", data: top10.map((x) => x.score), itemStyle: { color: "#dc2626", borderRadius: [0, 4, 4, 0] } }],
             });
         }
 
         const scEl = document.getElementById("cs341-c-scatter");
         if (scEl) {
-            if (!this.scatterChart) {
-                this.scatterChart = echarts.init(scEl);
-                new ResizeObserver(() => this.scatterChart?.resize()).observe(scEl);
-            }
+            if (!this.scatterChart) this.scatterChart = echarts.init(scEl);
             this.scatterChart.setOption({
                 tooltip: {
                     trigger: "item",
-                    formatter: (p: { data: [number, number, number, string, number] }) => {
-                        const [b, lst, g, name, rank] = p.data;
-                        return `<b>#${rank} ${name}</b><br>ความหนาแน่นอาคาร: ${b.toFixed(1)}%<br>อุณหภูมิ LST: ${lst.toFixed(2)} °C<br>พื้นที่สีเขียว: ${g.toFixed(1)}%`;
+                    formatter: (p: { data?: [number, number, number, string, number] }) => {
+                        const d = p.data;
+                        if (!d) return "";
+                        return `<b>${escHtml(d[3])}</b><br>คะแนนเปราะบาง: ${d[4]}/100<br>อาคาร: ${d[0].toFixed(1)}% · LST: ${d[1].toFixed(2)} °C<br>ขาดแคลนสีเขียว: ${d[2].toFixed(0)}%`;
                     },
                 },
-                grid: { left: 46, right: 20, top: 24, bottom: 36 },
-                xAxis: { type: "value", name: "ความหนาแน่นอาคาร (%)", nameLocation: "middle", nameGap: 22 },
-                yAxis: { type: "value", name: "LST (°C)", scale: true },
+                grid: { left: 45, right: 18, top: 20, bottom: 32 },
+                xAxis: { name: "อาคาร (%)", nameLocation: "middle", nameGap: 20, type: "value" },
+                yAxis: { name: "LST (°C)", type: "value", scale: true },
                 series: [
                     {
                         type: "scatter",
-                        symbolSize: (d: number[]) => Math.max(10, 26 - d[2] * 0.4),
-                        data: this.cached
-                            .filter((c) => c.builtup300 != null && c.lst300 != null)
-                            .map((c) => [c.builtup300!, c.lst300!, (c.green300 ?? 0) * 100, c.name, c.rank]),
-                        itemStyle: {
-                            color: (p: { data: number[] }) => (p.data[1] >= 41 ? "#dc2626" : p.data[1] >= 38 ? "#f59e0b" : "#10b981"),
-                            opacity: 0.85,
-                        },
+                        symbolSize: (val: number[]) => clamp((val[2] || 20) * 0.25 + 8, 8, 28),
+                        data: this.items
+                            .filter((x) => x.builtup300 != null && x.lst300 != null)
+                            .map((x) => [
+                                x.builtup300!,
+                                x.lst300!,
+                                x.greenRatio300 != null ? (1 - clamp(x.greenRatio300 / 0.5, 0, 1)) * 100 : 50,
+                                x.name,
+                                x.score,
+                            ]),
+                        itemStyle: { color: "#f97316", opacity: 0.8 },
                     },
                 ],
             });
         }
     }
 
-    private renderGlossary() {
-        const box = document.getElementById("cs341-glossary-box");
-        if (!box) return;
-        box.innerHTML = COMMUNITY_GLOSSARY.map(
-            (g) => `
-      <div class="gloss-item">
-        <div class="g-head"><span class="g-tag">${g.code}</span><strong>${g.name}</strong></div>
-        <p>${g.desc}</p>
-      </div>`
-        ).join("");
+    resize() {
+        this.barChart?.resize();
+        this.scatterChart?.resize();
     }
 }

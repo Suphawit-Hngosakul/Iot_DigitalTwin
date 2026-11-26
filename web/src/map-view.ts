@@ -3,7 +3,8 @@ import * as echarts from "echarts";
 import { api, toMinuteObjects } from "./api";
 import { AOI, cellOf, getMockBuildingsGeoJson, LEGENDS } from "./mock-api";
 import {
-  buildCommunityPriorityHtml,
+  bindCommunitySimulationEvents,
+  buildCommunitySimulationHtml,
   evaluateAllCommunities,
   type CommunityPriorityResult,
 } from "./community-priority";
@@ -142,14 +143,14 @@ function evalSurfaceLst(lst: unknown): HeatStatus {
     return {
       level: "danger",
       badge: "ร้อนจัดวิกฤต (Extreme Hotspot)",
-      desc: `พื้นผิวร้อนจัด ${v.toFixed(2)} °C (สูงกว่าโซนสีเขียว >10 °C) สะสมความร้อนรุนแรง ควรเพิ่มร่มเงา/ต้นไม้เร่งด่วน`,
+      desc: `พื้นผิวร้อนจัด ${v.toFixed(2)} °C (สูงกว่าโซนสีเขียว >10 °C) สะสมความร้อนรุนแรง`,
     };
   }
   if (v >= 40) {
     return {
       level: "warn",
       badge: "ร้อนสะสมสูง (UHI Hotspot)",
-      desc: `พื้นผิวหลังคา/คอนกรีต ${v.toFixed(2)} °C สูงกว่าโซนสีเขียวทั่วไป ~6–9 °C แผ่รังสีความร้อนลงสู่ทางเดินเท้า`,
+      desc: `พื้นผิวหลังคา/คอนกรีต ${v.toFixed(2)} °C สูงกว่าโซนสีเขียวทั่วไป ~6–9 °C`,
     };
   }
   if (v >= 35) {
@@ -162,7 +163,7 @@ function evalSurfaceLst(lst: unknown): HeatStatus {
   return {
     level: "cool",
     badge: "โซนเย็น / ระบายความร้อนดี",
-    desc: `อุณหภูมิพื้นผิว ${v.toFixed(2)} °C อยู่ในเกณฑ์เย็นสบาย ช่วยลดความร้อนให้พื้นที่รอบข้าง`,
+    desc: `อุณหภูมิพื้นผิว ${v.toFixed(2)} °C อยู่ในเกณฑ์เย็นสบาย`,
   };
 }
 
@@ -225,6 +226,23 @@ function buildVerdictHtml(lst: unknown, air?: unknown, includeAir = true): strin
   `;
 }
 
+function getGeometryCenter(geom: GeoJSON.Geometry | null | undefined): [number, number] | null {
+  if (!geom) return null;
+  const coords: [number, number][] = [];
+  const collect = (c: unknown) => {
+    if (Array.isArray(c) && c.length >= 2 && typeof c[0] === "number" && typeof c[1] === "number") {
+      coords.push([c[0], c[1]]);
+    } else if (Array.isArray(c)) {
+      c.forEach(collect);
+    }
+  };
+  if ("coordinates" in geom) collect(geom.coordinates);
+  if (!coords.length) return null;
+  const lngs = coords.map((p) => p[0]);
+  const lats = coords.map((p) => p[1]);
+  return [(Math.min(...lngs) + Math.max(...lngs)) / 2, (Math.min(...lats) + Math.max(...lats)) / 2];
+}
+
 const hex = (c: [number, number, number]) => "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
 function normStops(lg?: LayerLegend): [number, string][] | null {
   if (!lg?.stops) return null;
@@ -256,6 +274,7 @@ export class MapController {
   devices: DeviceInfo[] = [];
   stationMarkers: maplibregl.Marker[] = [];
   communityRankings: CommunityPriorityResult[] = [];
+  private communityFeatures: GeoJSON.Feature[] = [];
   private liveMarker: maplibregl.Marker | null = null;
   private liveCoords: [number, number] | null = null;
   private liveRefreshTimer: number | null = null;
@@ -264,12 +283,15 @@ export class MapController {
   fitted = false;
   pitched = true;
   private drawerChart: echarts.ECharts | null = null;
+  private onCommunitiesLoaded?: (features: GeoJSON.Feature[]) => void;
 
   constructor(
     private getPeriod: () => string | null,
     private setPeriod: (p: string, periods: LayersResponse["periods"]) => void,
-    private getMatch: () => "all" | "window"
+    private getMatch: () => "all" | "window",
+    onCommunitiesLoaded?: (features: GeoJSON.Feature[]) => void
   ) {
+    this.onCommunitiesLoaded = onCommunitiesLoaded;
     this.map = new maplibregl.Map({
       container: "map",
       style: {
@@ -384,6 +406,29 @@ export class MapController {
     if (this.liveMarker) {
       this.liveMarker.getElement().style.display = isCs341 ? "none" : "";
     }
+  }
+
+  async focusCommunityById(communityId: string) {
+    if (!this.communityFeatures.length) {
+      await this.loadCommunities();
+    }
+    const feat = this.communityFeatures.find(
+      (f) => String(f.properties?.community_id || "") === communityId
+    );
+    if (!feat) return;
+
+    const commCb = document.getElementById("comm-on") as HTMLInputElement | null;
+    if (commCb && !commCb.checked) commCb.checked = true;
+    ["comm-fill", "comm-outline"]
+      .filter((l) => this.map.getLayer(l))
+      .forEach((l) => this.map.setLayoutProperty(l, "visibility", "visible"));
+
+    const center = getGeometryCenter(feat.geometry);
+    if (center) {
+      this.map.easeTo({ center, zoom: 16, duration: 600 });
+    }
+    this.highlightFeature(feat.geometry);
+    this.openCommunityDashboard(feat.properties || {});
   }
 
   private bindUi() {
@@ -511,10 +556,14 @@ export class MapController {
       return;
     }
 
+    this.communityFeatures = data.features;
     this.communityRankings = evaluateAllCommunities(data.features);
+    if (this.onCommunitiesLoaded) {
+      this.onCommunitiesLoaded(data.features);
+    }
 
     if (note) {
-      note.innerHTML = `พบ <b>${data.features.length} ชุมชน</b> (เขตดอนเมือง–หลักสี่) · คลิกเพื่อดูลำดับความเร่งด่วน`;
+      note.innerHTML = `พบ <b>${data.features.length} ชุมชน</b> · สีวงกลมแสดงระดับความเปราะบาง (ไม่ใช่ °C)`;
     }
 
     const existing = this.map.getSource("communities") as maplibregl.GeoJSONSource | undefined;
@@ -554,14 +603,12 @@ export class MapController {
     const cid = String(props.community_id || "");
     const evaluated =
       this.communityRankings.find((c) => c.id === cid) ||
-      evaluateAllCommunities([
-        { type: "Feature", geometry: null as unknown as GeoJSON.Geometry, properties: props },
-      ])[0];
+      evaluateAllCommunities([{ properties: props }])[0];
 
     const pct = (v: unknown) => (v != null && v !== "" ? `${fmt(Number(v) * 100, 1)} %` : "—");
 
     const html = `
-      ${buildCommunityPriorityHtml(evaluated)}
+      ${buildCommunitySimulationHtml(evaluated, 30)}
       ${buildVerdictHtml(props.lst_mean_300, null, false)}
 
       <div class="d-kpis">
@@ -615,6 +662,8 @@ export class MapController {
       sub: `เขต${String(props.district || "—")} · ${evaluated.tierLabel}`,
       html,
       onReady: () => {
+        bindCommunitySimulationEvents(document.getElementById("comm-sim-box"), evaluated);
+
         const el = document.getElementById("drawer-chart");
         if (!el) return;
         this.drawerChart = echarts.init(el);

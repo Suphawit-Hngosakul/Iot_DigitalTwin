@@ -21,7 +21,9 @@ async function bootstrap() {
   const researchCtrl = new ResearchController(() => currentPeriod, () => currentMatch);
   const iotCtrl = new IotController();
   const commStatsCtrl = new CommunityStatsController();
-  const mapCtrl = new MapController(
+
+  let mapCtrl!: MapController;
+  mapCtrl = new MapController(
     () => currentPeriod,
     (p: string, periods: LayersResponse["periods"]) => {
       const sel = document.getElementById("period") as HTMLSelectElement;
@@ -29,8 +31,17 @@ async function bootstrap() {
       sel.value = p;
       currentPeriod = p;
     },
-    () => currentMatch
+    () => currentMatch,
+    (features) => {
+      commStatsCtrl.setCommunities(features);
+    }
   );
+
+  commStatsCtrl.setJumpHandler(async (communityId: string) => {
+    switchProjectMode("cs341");
+    showTab("map");
+    await mapCtrl.focusCommunityById(communityId);
+  });
 
   const chartsSub = document.getElementById("stats-sub-charts")!;
   const researchSub = document.getElementById("stats-sub-research")!;
@@ -47,6 +58,7 @@ async function bootstrap() {
       chartsSub.classList.add("hidden");
       researchSub.classList.add("hidden");
       commStatsCtrl.render();
+      commStatsCtrl.resize();
     } else {
       const isResearch = subResearchBtn.classList.contains("active");
       chartsSub.classList.toggle("hidden", isResearch);
@@ -72,6 +84,7 @@ async function bootstrap() {
     if (name === "iot") iotCtrl.load();
     statsCtrl.resize();
     iotCtrl.resize();
+    commStatsCtrl.resize();
   }
 
   function switchProjectMode(mode: ProjectMode) {
@@ -143,6 +156,7 @@ async function bootstrap() {
   window.addEventListener("resize", () => {
     statsCtrl.resize();
     iotCtrl.resize();
+    commStatsCtrl.resize();
   });
 
   await mapCtrl.initData();
