@@ -5,9 +5,8 @@ import { StatsController } from "./stats-view";
 import { ResearchController } from "./research-view";
 import { IotController } from "./iot-view";
 import { CommunityStatsController } from "./community-priority";
+import { CascadingPeriodController } from "./period-selector";
 import type { LayersResponse } from "./types";
-
-const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
 async function bootstrap() {
   await loadConfig();
@@ -22,14 +21,27 @@ async function bootstrap() {
   const iotCtrl = new IotController();
   const commStatsCtrl = new CommunityStatsController();
 
+  const handlePeriodSelected = async (nextPeriod: string) => {
+    currentPeriod = nextPeriod;
+    await mapCtrl.refreshPeriod();
+    if (activeTab === "stats") {
+      if (projectMode === "cs341") commStatsCtrl.render();
+      else if (!researchSub.classList.contains("hidden")) researchCtrl.load(true);
+      else statsCtrl.load(true);
+    } else {
+      statsCtrl.invalidate();
+      researchCtrl.invalidate();
+    }
+  };
+
+  const periodCtrl = new CascadingPeriodController(handlePeriodSelected);
+
   let mapCtrl!: MapController;
   mapCtrl = new MapController(
-    () => currentPeriod,
+    () => periodCtrl.getPeriod() || currentPeriod,
     (p: string, periods: LayersResponse["periods"]) => {
-      const sel = document.getElementById("period") as HTMLSelectElement;
-      sel.innerHTML = periods.map((x) => `<option value="${esc(x.period)}">${esc(x.period)}</option>`).join("");
-      sel.value = p;
       currentPeriod = p;
+      periodCtrl.setPeriods(periods, p, false);
     },
     () => currentMatch,
     (features) => {
@@ -131,19 +143,6 @@ async function bootstrap() {
   subChartsBtn.onclick = () => showStatsSub("charts");
   subResearchBtn.onclick = () => showStatsSub("research");
   document.getElementById("sub-back-btn")!.onclick = () => showStatsSub("charts");
-
-  (document.getElementById("period") as HTMLSelectElement).onchange = async (e) => {
-    currentPeriod = (e.target as HTMLSelectElement).value;
-    await mapCtrl.refreshPeriod();
-    if (activeTab === "stats") {
-      if (projectMode === "cs341") commStatsCtrl.render();
-      else if (!researchSub.classList.contains("hidden")) researchCtrl.load(true);
-      else statsCtrl.load(true);
-    } else {
-      statsCtrl.invalidate();
-      researchCtrl.invalidate();
-    }
-  };
 
   (document.getElementById("match") as HTMLSelectElement).onchange = async (e) => {
     currentMatch = (e.target as HTMLSelectElement).value as "all" | "window";

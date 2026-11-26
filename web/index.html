@@ -30,8 +30,22 @@
       <button id="tab-btn-iot" data-tab="iot">3. Realtime &amp; ข้อมูลย้อนหลัง IoT</button>
     </nav>
 
-    <div class="globals">
-      <label>ช่วงเวลา <select id="period"></select></label>
+    <div class="globals period-cascade">
+      <label>รูปแบบ
+        <select id="period-kind" title="เลือกรูปแบบข้อมูล scene หรือ season">
+          <option value="scene">scene (รายวัน/รายฉาก)</option>
+          <option value="season">season (รายฤดูกาล)</option>
+        </select>
+      </label>
+      <label>ปี
+        <select id="period-year" title="เลือกปี"></select>
+      </label>
+      <label>เดือน
+        <select id="period-month" title="เลือกเดือน"></select>
+      </label>
+      <label>วัน / ช่วง
+        <select id="period-day" title="เลือกวันหรือช่วงเวลา"></select>
+      </label>
       <label>โหมดเวลา
         <select id="match">
           <option value="all">ทุกเวลา (All)</option>
@@ -359,7 +373,8 @@
             <div>
               <h2>วิเคราะห์ความเปราะบาง จำลองสมมติฐาน และเปรียบเทียบชุมชน (CS341)</h2>
               <p>สีวงกลมบนแผนที่แสดง <b>ระดับความเปราะบาง (ไม่ใช่ °C)</b> ส่วนการจำลองเพิ่มต้นไม้ 10–200 ต้นเป็น
-                <b>ค่าสมมติเชิงจำลอง</b> อิงตัวแปรของแต่ละชุมชน (ยังไม่ได้ลงพื้นที่จริง)</p>
+                <b>ค่าสมมติเชิงจำลอง</b> อิงตัวแปรของแต่ละชุมชน (ยังไม่ได้ลงพื้นที่จริง)
+              </p>
             </div>
           </div>
 
