@@ -29,7 +29,14 @@ export interface CommunityPriorityResult {
 
 export interface TreeSimulationResult {
     trees: number;
+    canopyPerTreeSqm: number;
     addedCanopySqm: number;
+    totalBufferSqm: number;
+    builtupSqm: number;
+    existingGreenSqm: number;
+    availableOpenSqm: number;
+    availableOpenPct: number;
+    openAreaFillPct: number;
     currentGreenPct: number;
     simulatedGreenPct: number;
     deltaGreenPct: number;
@@ -39,12 +46,18 @@ export interface TreeSimulationResult {
     currentScore: number;
     simulatedScore: number;
     deltaScore: number;
-    estimatedLstDelta: number;
-    simulatedLst300: number;
+    heatExcessC: number;
+    peakSpreadC: number;
+    builtupFactor: number;
+    lstDropLow: number;
+    lstDropHigh: number;
+    lstDropMid: number;
+    simulatedLstMid: number | null;
 }
 
-const CANOPY_SQM_PER_TREE = 12;
-const RADIUS_300_AREA_SQM = Math.PI * 300 * 300;
+const CANOPY_SQM_PER_TREE = 25; // เรือนยอดไม้ยืนต้นเขตเมืองโตเต็มวัย (~รัศมี 2.8 ม. ≈ 25 ตร.ม./ต้น)
+const RADIUS_300_AREA_SQM = Math.round(Math.PI * 300 * 300); // 282,743 ตร.ม.
+const BASELINE_COOL_LST = 35.0; // อุณหภูมิพื้นผิวอ้างอิงโซนระบายความร้อนดี (°C)
 
 const numOrNull = (v: unknown): number | null => {
     if (v == null || v === "") return null;
@@ -61,48 +74,97 @@ const escHtml = (s: unknown) =>
     String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
 export function simulateTreeAddition(
-    c: Pick<CommunityPriorityResult, "lst300" | "builtup300" | "greenRatio300" | "ndvi300" | "score">,
+    c: Pick<
+        CommunityPriorityResult,
+        "lst300" | "lstP90_300" | "builtup300" | "greenRatio300" | "ndvi300" | "score"
+    >,
     trees: number
 ): TreeSimulationResult {
     const safeTrees = Math.max(0, Math.round(trees));
     const addedCanopySqm = safeTrees * CANOPY_SQM_PER_TREE;
-    const addedGreenRatio = addedCanopySqm / RADIUS_300_AREA_SQM;
 
-    const baseGreenRatio = clamp(c.greenRatio300 ?? 0.2, 0, 0.95);
-    const simGreenRatio = clamp(baseGreenRatio + addedGreenRatio, 0, 0.98);
-    const currentGreenPct = baseGreenRatio * 100;
-    const simulatedGreenPct = simGreenRatio * 100;
+    const builtupFrac = clamp((c.builtup300 ?? 30) / 100, 0, 0.85);
+    const baseGreenFrac = clamp(c.greenRatio300 ?? 0.2, 0, 0.9);
+
+    const builtupSqm = Math.round(RADIUS_300_AREA_SQM * builtupFrac);
+    const existingGreenSqm = Math.round(RADIUS_300_AREA_SQM * baseGreenFrac);
+
+    // พื้นที่เปิดโล่งที่ปลูกแทรกได้จริง = พื้นที่ทั้งหมด - พื้นที่อาคาร - พื้นที่สีเขียวเดิม (ขั้นต่ำ 10% ของบัฟเฟอร์)
+    const openFrac = clamp(1 - builtupFrac - baseGreenFrac, 0.1, 0.95);
+    const availableOpenSqm = Math.round(RADIUS_300_AREA_SQM * openFrac);
+    const availableOpenPct = openFrac * 100;
+
+    // สัดส่วนพื้นที่เปิดโล่งของชุมชนที่ถูกเติมด้วยเรือนยอดไม้ใหม่
+    const openAreaFillPct = clamp((addedCanopySqm / Math.max(availableOpenSqm, 1)) * 100, 0, 100);
+
+    // พื้นที่สีเขียวใหม่เทียบกับรัศมี 300 ม. ทั้งหมด
+    const addedGreenFrac = clamp(addedCanopySqm / RADIUS_300_AREA_SQM, 0, openFrac);
+    const simGreenFrac = clamp(baseGreenFrac + addedGreenFrac, 0, 0.98);
+
+    const currentGreenPct = baseGreenFrac * 100;
+    const simulatedGreenPct = simGreenFrac * 100;
     const deltaGreenPct = simulatedGreenPct - currentGreenPct;
 
+    // NDVI ปรับเพิ่มตามสัดส่วนเรือนยอดเทียบกับพื้นที่เปิดโล่งและช่องว่าง NDVI ที่เหลือ (1 - NDVI_current)
     const baseNdvi = clamp(c.ndvi300 ?? 0.25, -0.2, 0.9);
-    const simNdvi = clamp(baseNdvi + addedGreenRatio * 0.85, -0.2, 0.95);
-    const deltaNdvi = simNdvi - baseNdvi;
+    const ndviHeadroom = clamp(0.85 - baseNdvi, 0.1, 0.9);
+    const deltaNdvi = clamp((openAreaFillPct / 100) * ndviHeadroom * 0.65, 0, 0.35);
+    const simulatedNdvi = clamp(baseNdvi + deltaNdvi, -0.2, 0.95);
+
+    // ตัวคูณความไวต่อความร้อนจากตัวแปรจริงของชุมชนนั้น
+    const lstVal = c.lst300 ?? 41.0;
+    const lstP90Val = c.lstP90_300 ?? lstVal + 1.5;
+    const heatExcessC = Math.max(0, lstVal - BASELINE_COOL_LST);
+    const peakSpreadC = Math.max(0, lstP90Val - lstVal);
+    const builtupFactor = 1 + builtupFrac * 0.8;
+
+    // สเกลความเย็นเชิงสมมติ (อิงความรุนแรงความร้อน × ความหนาแน่นอาคาร × สัดส่วนพื้นที่เปิดโล่งที่ถูกเติมร่มเงา)
+    const coolingPotential =
+        (openAreaFillPct / 100) * (heatExcessC * 0.22 + peakSpreadC * 0.15) * builtupFactor;
+
+    const lstDropLow = Number(clamp(coolingPotential * 0.7, 0.02, 1.5).toFixed(2));
+    const lstDropHigh = Number(clamp(coolingPotential * 1.35, 0.04, 2.5).toFixed(2));
+    const lstDropMid = Number(((lstDropLow + lstDropHigh) / 2).toFixed(2));
+    const simulatedLstMid =
+        c.lst300 != null ? Number((c.lst300 - lstDropMid).toFixed(2)) : null;
+
+    // คะแนนความเปราะบางใหม่คำนวณซ้ำจากสมการดัชนีเดียวกัน (40% LST + 30% อาคาร + 30% ขาดแคลนสีเขียว)
+    const newLst = simulatedLstMid ?? lstVal;
+    const newHeatNorm = clamp(((newLst - 34) / 14) * 100, 0, 100);
+    const bldgNorm = clamp(((c.builtup300 ?? 30) / 60) * 100, 0, 100);
+    const newGreenDeficitNorm = clamp((1 - clamp(simGreenFrac / 0.5, 0, 1)) * 100, 0, 100);
+    const rawNewScore = Math.round(newHeatNorm * 0.4 + bldgNorm * 0.3 + newGreenDeficitNorm * 0.3);
 
     const currentScore = c.score;
-    // คะแนนความเปราะบางลดลงตามสัดส่วนพื้นที่สีเขียวที่จำลองเพิ่มขึ้น (ค่าสมมติเพื่อเปรียบเทียบ)
-    const scoreReduction = clamp(deltaGreenPct * 1.4, 0, 18);
-    const simulatedScore = Math.round(clamp(currentScore - scoreReduction, 0, 100));
+    const simulatedScore = Math.min(currentScore, clamp(rawNewScore, 0, 100));
     const deltaScore = simulatedScore - currentScore;
-
-    // สมมติฐานเชิงจำลอง: ลดลงเล็กน้อยตามสัดส่วนสีเขียวที่เพิ่ม (ระบุชัดว่าเป็นค่าสมมติ)
-    const estimatedLstDelta = -Number(clamp(deltaGreenPct * 0.08, 0, 0.8).toFixed(2));
-    const simulatedLst300 =
-        c.lst300 != null ? Number((c.lst300 + estimatedLstDelta).toFixed(2)) : 0;
 
     return {
         trees: safeTrees,
+        canopyPerTreeSqm: CANOPY_SQM_PER_TREE,
         addedCanopySqm,
+        totalBufferSqm: RADIUS_300_AREA_SQM,
+        builtupSqm,
+        existingGreenSqm,
+        availableOpenSqm,
+        availableOpenPct,
+        openAreaFillPct,
         currentGreenPct,
         simulatedGreenPct,
         deltaGreenPct,
         currentNdvi: baseNdvi,
-        simulatedNdvi: simNdvi,
+        simulatedNdvi,
         deltaNdvi,
         currentScore,
         simulatedScore,
         deltaScore,
-        estimatedLstDelta,
-        simulatedLst300,
+        heatExcessC,
+        peakSpreadC,
+        builtupFactor,
+        lstDropLow,
+        lstDropHigh,
+        lstDropMid,
+        simulatedLstMid,
     };
 }
 
@@ -132,7 +194,6 @@ export function evaluateAllCommunities(
         const ndvi500 = numOrNull(p.ndvi_mean_500);
         const bldgCount300 = numOrNull(p.building_count_300);
 
-        // คะแนนความเปราะบาง (0-100): ความร้อนพื้นผิว (40%) + ความหนาแน่นอาคาร (30%) + ความขาดแคลนพื้นที่สีเขียว (30%)
         const heatNorm = lst300 != null ? clamp(((lst300 - 34) / 14) * 100, 0, 100) : 50;
         const bldgNorm = builtup300 != null ? clamp((builtup300 / 60) * 100, 0, 100) : 45;
         const greenDeficitNorm =
@@ -166,9 +227,8 @@ export function evaluateAllCommunities(
         ].sort((a, b) => b.val - a.val);
 
         const primaryDriver = `ปัจจัยเด่นในดัชนี: ${drivers[0].label}`;
-
         const simulationNote =
-            "หมายเหตุ: ข้อมูลนี้ประเมินจากตัวแปรเชิงพื้นที่และดาวเทียม ยังไม่ได้สำรวจหน้างานจริง ตัวเลขการเพิ่มต้นไม้เป็น 'ค่าสมมติเชิงจำลอง' เพื่อเปรียบเทียบสัดส่วนพื้นที่สีเขียว";
+            "หมายเหตุ: การจำลองนี้คำนวณจากตัวแปรจริงของชุมชนนี้ (พื้นที่อาคาร, พื้นที่สีเขียวเดิม, LST และ p90) เพื่อเปรียบเทียบสมมติฐาน ยังไม่ใช่ผลตรวจวัดจริงหน้างาน";
 
         return {
             id,
@@ -244,59 +304,112 @@ export function buildCommunitySimulationHtml(
     </div>
 
     <div class="d-card" id="comm-sim-box">
-      <h4>🧪 จำลองสมมติฐานการเพิ่มต้นไม้ (ค่าสมมติ — ยังไม่ลงพื้นที่จริง)</h4>
-      <p class="note">เลือกจำนวนต้นไม้ที่สมมติว่าจะเพิ่มในชุมชน (สมมติเรือนยอด ~${CANOPY_SQM_PER_TREE} ตร.ม./ต้น ในรัศมี 300 ม.):</p>
+      <h4>🧪 จำลองสมมติฐานการเพิ่มต้นไม้ (อิงตัวแปรจริงของชุมชนนี้)</h4>
+      <p class="note">เลือกจำนวนต้นไม้สมมติ (เรือนยอดเฉลี่ย ~${CANOPY_SQM_PER_TREE} ตร.ม./ต้น) เพื่อคำนวณเทียบกับพื้นที่เปิดโล่งจริงของชุมชน:</p>
       <div style="display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 10px;" id="comm-sim-btns">
         ${buttonsHtml}
       </div>
       <div id="comm-sim-result">
-        ${renderSimulationSummary(sim)}
+        ${renderSimulationSummary(c, sim)}
       </div>
     </div>
   `;
 }
 
-function renderSimulationSummary(s: TreeSimulationResult): string {
+function renderSimulationSummary(
+    c: Pick<CommunityPriorityResult, "name" | "lst300" | "lstP90_300" | "builtup300" | "greenRatio300" | "ndvi300">,
+    s: TreeSimulationResult
+): string {
     return `
     <div class="d-kpis" style="grid-template-columns: 1fr 1fr; margin-bottom:8px;">
       <div class="d-kpi cool">
-        <div class="lbl">พื้นที่สีเขียว (ค่าสมมติ +${s.trees} ต้น)</div>
+        <div class="lbl">พื้นที่สีเขียวใหม่ (+${s.trees} ต้น)</div>
         <div class="val">${s.simulatedGreenPct.toFixed(2)} %</div>
-        <div class="sub">เดิม ${s.currentGreenPct.toFixed(2)}% (เพิ่ม +${s.deltaGreenPct.toFixed(2)}% · ~${s.addedCanopySqm} ตร.ม.)</div>
+        <div class="sub">เดิม ${s.currentGreenPct.toFixed(2)}% (+${s.deltaGreenPct.toFixed(2)}% · เติมพื้นที่เปิดโล่ง ${s.openAreaFillPct.toFixed(2)}%)</div>
       </div>
-      <div class="d-kpi amber">
-        <div class="lbl">คะแนนเปราะบาง (ค่าสมมติ)</div>
-        <div class="val">${s.simulatedScore} / 100</div>
-        <div class="sub">เดิม ${s.currentScore} (${s.deltaScore <= 0 ? s.deltaScore : "+" + s.deltaScore} คะแนน)</div>
+      <div class="d-kpi warm">
+        <div class="lbl">ช่วง LST ที่คาดว่าจะลด (ค่าสมมติ)</div>
+        <div class="val">-${s.lstDropLow.toFixed(2)} ถึง -${s.lstDropHigh.toFixed(2)} °C</div>
+        <div class="sub">ค่ากลางสมมติ: ${s.simulatedLstMid != null ? s.simulatedLstMid.toFixed(2) + " °C" : "—"}</div>
       </div>
     </div>
     <table class="d-table">
       <thead>
         <tr>
           <th>ตัวแปร</th>
-          <th>ปัจจุบัน</th>
-          <th>ค่าสมมติ (+${s.trees} ต้น)</th>
+          <th>ค่าปัจจุบันของชุมชน</th>
+          <th>ค่าจำลอง (+${s.trees} ต้น)</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td>สัดส่วนพื้นที่สีเขียว</td>
+          <td>พื้นที่เปิดโล่งที่ปลูกแทรกได้</td>
+          <td>${s.availableOpenSqm.toLocaleString()} ตร.ม. (${s.availableOpenPct.toFixed(1)}%)</td>
+          <td>ถูกเติมร่มเงาเพิ่ม <b>${s.addedCanopySqm.toLocaleString()} ตร.ม.</b> (${s.openAreaFillPct.toFixed(2)}%)</td>
+        </tr>
+        <tr>
+          <td>สัดส่วนพื้นที่สีเขียว (300 ม.)</td>
           <td>${s.currentGreenPct.toFixed(2)} %</td>
           <td><b>${s.simulatedGreenPct.toFixed(2)} %</b> (+${s.deltaGreenPct.toFixed(2)}%)</td>
         </tr>
         <tr>
-          <td>ดัชนี NDVI (จำลอง)</td>
+          <td>ดัชนีพืชพรรณ (NDVI)</td>
           <td>${s.currentNdvi.toFixed(3)}</td>
           <td><b>${s.simulatedNdvi.toFixed(3)}</b> (+${s.deltaNdvi.toFixed(3)})</td>
         </tr>
         <tr>
-          <td>LST 300 ม. (ผลคาดการณ์สมมติ)</td>
-          <td>${s.simulatedLst300 ? (s.simulatedLst300 - s.estimatedLstDelta).toFixed(2) + " °C" : "—"}</td>
-          <td><b>${s.simulatedLst300 ? s.simulatedLst300.toFixed(2) + " °C" : "—"}</b> (${s.estimatedLstDelta} °C)</td>
+          <td>อุณหภูมิพื้นผิว (LST 300 ม.)</td>
+          <td>${c.lst300 != null ? c.lst300.toFixed(2) + " °C" : "—"}</td>
+          <td><b>${s.simulatedLstMid != null ? s.simulatedLstMid.toFixed(2) + " °C" : "—"}</b> (ช่วง -${s.lstDropLow} ถึง -${s.lstDropHigh} °C)</td>
+        </tr>
+        <tr>
+          <td>คะแนนความเปราะบางรวม</td>
+          <td>${s.currentScore} / 100</td>
+          <td><b>${s.simulatedScore} / 100</b> (${s.deltaScore <= 0 ? s.deltaScore : "+" + s.deltaScore} คะแนน)</td>
         </tr>
       </tbody>
     </table>
-    <p class="note" style="margin-top:6px;">⚠️ <b>ค่าสมมติเท่านั้น:</b> ตัวเลขนี้เป็นแบบจำลองทางคณิตศาสตร์เบื้องต้น ไม่ใช่ผลการตรวจวัดจริงหรือคำสั่งออกแบบหน้างาน ควรลงพื้นที่สำรวจสภาพซอยจริงก่อนตัดสินใจ</p>
+
+    <details class="glossary-card" style="margin-top:8px;">
+      <summary>
+        <span>📐 ดูหลักฐานและขั้นตอนการคำนวณตัวเลขสมมตินี้</span>
+        <span class="gloss-hint">กดเพื่อดูสมการและตัวแปรตั้งต้น</span>
+      </summary>
+      <div class="glossary-list">
+        <div class="gloss-item">
+          <div class="g-head"><span class="g-tag">ขั้นที่ 1</span><strong>คำนวณพื้นที่เปิดโล่งที่ปลูกแทรกได้จริง (A_open)</strong></div>
+          <p>
+            พื้นที่บัฟเฟอร์ 300 ม. = <b>${s.totalBufferSqm.toLocaleString()} ตร.ม.</b><br>
+            หักพื้นที่อาคาร (<code>builtup_pct_300</code> = ${fmtNum(c.builtup300, 1)}%) = <b>${s.builtupSqm.toLocaleString()} ตร.ม.</b><br>
+            หักพื้นที่สีเขียวเดิม (<code>green_ratio_300</code> = ${s.currentGreenPct.toFixed(1)}%) = <b>${s.existingGreenSqm.toLocaleString()} ตร.ม.</b><br>
+            → เหลือพื้นที่เปิดโล่ง/ดาดแข็งที่ปลูกแทรกได้ <b>${s.availableOpenSqm.toLocaleString()} ตร.ม.</b> (${s.availableOpenPct.toFixed(1)}%)
+          </p>
+        </div>
+        <div class="gloss-item">
+          <div class="g-head"><span class="g-tag">ขั้นที่ 2</span><strong>คำนวณเรือนยอดไม้ที่เพิ่มเทียบกับพื้นที่เปิดโล่ง</strong></div>
+          <p>
+            ปลูกสมมติ <b>${s.trees} ต้น</b> × เรือนยอด <b>${s.canopyPerTreeSqm} ตร.ม./ต้น</b> = <b>${s.addedCanopySqm.toLocaleString()} ตร.ม.</b><br>
+            คิดเป็น <b>${s.openAreaFillPct.toFixed(2)}%</b> ของพื้นที่เปิดโล่งในชุมชน และเพิ่ม <code>green_ratio_300</code> ขึ้น <b>+${s.deltaGreenPct.toFixed(2)}%</b> (จาก ${s.currentGreenPct.toFixed(2)}% → ${s.simulatedGreenPct.toFixed(2)}%)
+          </p>
+        </div>
+        <div class="gloss-item">
+          <div class="g-head"><span class="g-tag">ขั้นที่ 3</span><strong>ตัวคูณความไวต่อความร้อนจากข้อมูลจริงของชุมชน</strong></div>
+          <p>
+            ส่วนต่างความร้อนเหนือฐาน 35 °C (<code>lst_mean_300</code> = ${fmtNum(c.lst300, 2)} °C) = <b>+${s.heatExcessC.toFixed(2)} °C</b><br>
+            ความรุนแรงช่วงพีค (<code>lst_p90_300 - lst_mean_300</code>) = <b>+${s.peakSpreadC.toFixed(2)} °C</b><br>
+            ตัวคูณความแออัดอาคาร (<code>1 + 0.8 × builtup</code>) = <b>${s.builtupFactor.toFixed(2)}x</b><br>
+            → เมื่อนำมาถ่วงน้ำหนักกับสัดส่วนร่มเงาใหม่ จึงประเมินช่วงการลดลงของ LST ได้ <b>-${s.lstDropLow.toFixed(2)} ถึง -${s.lstDropHigh.toFixed(2)} °C</b>
+          </p>
+        </div>
+        <div class="gloss-item">
+          <div class="g-head"><span class="g-tag">ขั้นที่ 4</span><strong>คำนวณคะแนนความเปราะบางใหม่ (Vulnerability Re-scoring)</strong></div>
+          <p>
+            ใช้สมการถ่วงน้ำหนัก 3 มิติ (ความร้อน 40% + ความหนาแน่นอาคาร 30% + การขาดแคลนสีเขียว 30%) แทนค่า <code>LST</code> และ <code>green_ratio</code> ใหม่หลังจำลอง ได้คะแนน <b>${s.simulatedScore}/100</b> (เปลี่ยนแปลง <b>${s.deltaScore}</b> คะแนน)
+          </p>
+        </div>
+      </div>
+    </details>
+    <p class="note" style="margin-top:6px;">⚠️ <b>ข้อจำกัดของแบบจำลอง:</b> ตัวเลขทั้งหมดคำนวณจากตัวแปรเชิงพื้นที่ของชุมชนนี้เพื่อใช้เปรียบเทียบสมมติฐานเท่านั้น ยังไม่รวมปัจจัยทิศทางลม ความสูงตึกบังแดด และการสำรวจพื้นที่ว่างจริงหน้างาน</p>
   `;
 }
 
@@ -313,7 +426,7 @@ export function bindCommunitySimulationEvents(
         btn.onclick = () => {
             const trees = Number(btn.dataset.simTrees || 30);
             btns.forEach((b) => b.classList.toggle("active", b === btn));
-            resultEl.innerHTML = renderSimulationSummary(simulateTreeAddition(c, trees));
+            resultEl.innerHTML = renderSimulationSummary(c, simulateTreeAddition(c, trees));
         };
     });
 }
@@ -377,7 +490,7 @@ export class CommunityStatsController {
         kpisEl.innerHTML = `
       <div class="kpi"><div class="l">ชุมชนทั้งหมด</div><div class="v">${this.items.length}</div><div class="l">จัดอันดับตามคะแนนความเปราะบาง</div></div>
       <div class="kpi"><div class="l">กลุ่มเปราะบางสูง</div><div class="v">${highCount}</div><div class="l">สีวงกลม = ความเปราะบาง (ไม่ใช่ °C)</div></div>
-      <div class="kpi"><div class="l">คะแนนความเปราะบางเฉลี่ย</div><div class="v">${avgScore}</div><div class="l">จาก 100 คะแนน (ค่าสมมติเชิงดัชนี)</div></div>
+      <div class="kpi"><div class="l">คะแนนความเปราะบางเฉลี่ย</div><div class="v">${avgScore}</div><div class="l">จาก 100 คะแนน (ดัชนี 3 มิติ)</div></div>
       <div class="kpi"><div class="l">อันดับ #1 ปัจจุบัน</div><div class="v" style="font-size:15px;">${escHtml(top1.name)}</div><div class="l">คะแนน ${top1.score}/100 · LST ${fmtNum(top1.lst300, 1)} °C</div></div>
     `;
 
@@ -422,7 +535,7 @@ export class CommunityStatsController {
           <button type="button" class="mini-btn" data-jump-comm="${escHtml(target.id)}">🗺️ เปิดตำแหน่งบนแผนที่</button>
         </h3>
         <p class="note">
-          <b>คำชี้แจง:</b> ระบบไม่ได้ลงพื้นที่จริง ตัวเลขด้านล่างเป็น <b>"ค่าสมมติเชิงจำลอง"</b> เมื่อเลือกเพิ่มต้นไม้ 10–50 ต้น (สมมติเรือนยอด ~${CANOPY_SQM_PER_TREE} ตร.ม./ต้น ในรัศมี 300 ม.) เพื่อดูการเปลี่ยนแปลงของสัดส่วนพื้นที่สีเขียวและคะแนนความเปราะบาง
+          <b>หลักการจำลอง:</b> คำนวณจากตัวแปรจริงของ <b>${escHtml(target.name)}</b> (<code>lst_mean_300</code> = ${fmtNum(target.lst300, 2)} °C, <code>lst_p90_300</code> = ${fmtNum(target.lstP90_300, 2)} °C, <code>builtup_pct_300</code> = ${fmtNum(target.builtup300, 1)}%, <code>green_ratio_300</code> = ${target.greenRatio300 != null ? fmtNum(target.greenRatio300 * 100, 1) + "%" : "—"}) โดยหักพื้นที่อาคารและสีเขียวเดิมออกเพื่อหาพื้นที่เปิดโล่งที่ปลูกแทรกได้จริง (<b>${sim.availableOpenSqm.toLocaleString()} ตร.ม.</b>)
         </p>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin:10px 0;">
           ${choices
@@ -432,7 +545,7 @@ export class CommunityStatsController {
                 )
                 .join("")}
         </div>
-        ${renderSimulationSummary(sim)}
+        ${renderSimulationSummary(target, sim)}
       </div>
     `;
 
@@ -469,11 +582,12 @@ export class CommunityStatsController {
         tbody.innerHTML = filtered
             .map((c) => {
                 const pillClass = c.tier === "high" ? "danger" : c.tier === "moderate" ? "warn" : "cool";
+                const sim50 = simulateTreeAddition(c, 50);
                 return `<tr>
           <td><b>#${c.rank}</b> <span class="note">(${c.score}/100)</span></td>
           <td><b>${escHtml(c.name)}</b><br><span class="note">เขต${escHtml(c.district)} · ${escHtml(c.id)}</span></td>
           <td><span class="v-pill ${pillClass}">${escHtml(c.rawRiskLevel || c.tier)}</span><br><span class="note">สีวงกลม = ความเปราะบาง</span></td>
-          <td><b>${fmtNum(c.lst300, 2)} °C</b></td>
+          <td><b>${fmtNum(c.lst300, 2)} °C</b><br><span class="note">p90: ${fmtNum(c.lstP90_300, 2)} °C</span></td>
           <td>${fmtNum(c.builtup300, 1)} %</td>
           <td>${c.greenRatio300 != null ? fmtNum(c.greenRatio300 * 100, 1) + " %" : "—"}</td>
           <td>
@@ -481,7 +595,7 @@ export class CommunityStatsController {
               <button type="button" class="mini-btn" data-jump-comm="${escHtml(c.id)}">🗺️ ดูบนแผนที่</button>
               <button type="button" class="mini-btn" data-sim-comm="${escHtml(c.id)}">🧪 จำลองต้นไม้</button>
             </div>
-            <div class="note" style="margin-top:4px;">${escHtml(c.primaryDriver)} (ค่าสมมติ)</div>
+            <div class="note" style="margin-top:4px;">สมมติ +50 ต้น: สีเขียว +${sim50.deltaGreenPct.toFixed(2)}% · คาด LST -${sim50.lstDropLow} ถึง -${sim50.lstDropHigh} °C</div>
           </td>
         </tr>`;
             })
