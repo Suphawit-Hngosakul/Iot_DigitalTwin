@@ -55,10 +55,16 @@ export interface TreeSimulationResult {
     simulatedLstMid: number | null;
 }
 
+export interface CommunityDiagnosis {
+    headline: string;
+    summary: string;
+    recommendations: string[];
+}
+
 export const TREE_CHOICES = [10, 30, 50, 100, 200] as const;
-const CANOPY_SQM_PER_TREE = 25; // เรือนยอดไม้ยืนต้นเขตเมืองโตเต็มวัย (~รัศมี 2.8 ม. ≈ 25 ตร.ม./ต้น)
-const RADIUS_300_AREA_SQM = Math.round(Math.PI * 300 * 300); // 282,743 ตร.ม.
-const BASELINE_COOL_LST = 35.0; // อุณหภูมิพื้นผิวอ้างอิงโซนระบายความร้อนดี (°C)
+const CANOPY_SQM_PER_TREE = 25;
+const RADIUS_300_AREA_SQM = Math.round(Math.PI * 300 * 300);
+const BASELINE_COOL_LST = 35.0;
 
 const numOrNull = (v: unknown): number | null => {
     if (v == null || v === "") return null;
@@ -73,6 +79,121 @@ const fmtNum = (v: number | null | undefined, d = 1) =>
 
 const escHtml = (s: unknown) =>
     String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+
+export function diagnoseCommunity(
+    c: Pick<
+        CommunityPriorityResult,
+        "name" | "lst300" | "lstP90_300" | "builtup300" | "greenRatio300" | "ndvi300" | "bldgCount300"
+    >,
+    sim?: TreeSimulationResult
+): CommunityDiagnosis {
+    const lst = c.lst300;
+    const p90 = c.lstP90_300;
+    const builtup = c.builtup300;
+    const greenPct = c.greenRatio300 != null ? c.greenRatio300 * 100 : null;
+    const ndvi = c.ndvi300;
+
+    const findings: string[] = [];
+    const recommendations: string[] = [];
+
+    const isHighHeat = lst != null && lst >= 42;
+    const isModHeat = lst != null && lst >= 38 && lst < 42;
+    const isHighBuiltup = builtup != null && builtup >= 40;
+    const isModBuiltup = builtup != null && builtup >= 25 && builtup < 40;
+    const isLowGreen = (greenPct != null && greenPct < 20) || (ndvi != null && ndvi < 0.2);
+
+    if (isHighHeat) {
+        findings.push(
+            `อุณหภูมิพื้นผิวเฉลี่ยสูงจัด (${fmtNum(lst, 2)} °C${p90 != null ? ` · ช่วงพีค p90 สูงถึง ${fmtNum(p90, 2)} °C` : ""})`
+        );
+    } else if (isModHeat) {
+        findings.push(`อุณหภูมิพื้นผิวสะสมปานกลางถึงค่อนข้างสูง (${fmtNum(lst, 2)} °C)`);
+    } else if (lst != null) {
+        findings.push(`อุณหภูมิพื้นผิวอยู่ที่ ${fmtNum(lst, 2)} °C`);
+    }
+
+    if (isLowGreen) {
+        findings.push(
+            `สัดส่วนพื้นที่สีเขียวน้อย (${greenPct != null ? fmtNum(greenPct, 1) + "%" : "—"}${ndvi != null ? ` · NDVI ${fmtNum(ndvi, 3)}` : ""})`
+        );
+        recommendations.push(
+            `เพิ่มพื้นที่สีเขียวและร่มเงาไม้ยืนต้นในจุดว่าง/ริมทางเดิน เพื่อเพิ่มการคายความชื้นและลดรังสีความร้อนตกกระทบพื้นผิว`
+        );
+    } else if (greenPct != null) {
+        findings.push(`มีพื้นที่สีเขียว ${fmtNum(greenPct, 1)}%`);
+    }
+
+    if (isHighBuiltup) {
+        findings.push(
+            `ความหนาแน่นอาคารสูง (${fmtNum(builtup, 1)}%${c.bldgCount300 != null ? ` · ประมาณ ${Math.round(c.bldgCount300)} หลัง` : ""}) ทำให้เกิดการสะสมความร้อนและกีดขวางการระบายลม`
+        );
+        recommendations.push(
+            `ลดแรงกดดันจากความหนาแน่นและมวลความร้อนของอาคาร โดยเน้นแนวทางลดความร้อนบนหลังคา/พื้นผิวดาดแข็ง (เช่น Cool/Green Roof, พื้นซึมผ่านได้) และรักษาช่องทางระบายลมระหว่างอาคาร`
+        );
+    } else if (isModBuiltup) {
+        findings.push(`ความหนาแน่นอาคารระดับปานกลาง (${fmtNum(builtup, 1)}%)`);
+        recommendations.push(
+            `จัดวางจุดร่มเงาและไม้พุ่ม/ไม้ยืนต้นเชื่อมโยงเป็นเครือข่าย (Green Corridor) ร่วมกับพื้นที่ว่างของชุมชน`
+        );
+    }
+
+    if (sim && sim.availableOpenSqm > 0) {
+        if (sim.openAreaFillPct < 5 && sim.trees >= 100) {
+            recommendations.push(
+                `แม้จำลองเพิ่ม ${sim.trees} ต้น แต่คิดเป็นสัดส่วนเพียง ${sim.openAreaFillPct.toFixed(1)}% ของพื้นที่เปิดโล่งที่มีอยู่ (${sim.availableOpenSqm.toLocaleString()} ตร.ม.) จึงควรทำควบคู่กับการลดความร้อนสะสมของอาคารและพื้นผิวดาดแข็งเพื่อให้เห็นผลชัดขึ้น`
+            );
+        } else if (recommendations.length === 0) {
+            recommendations.push(
+                `รักษาสัดส่วนพื้นที่สีเขียวเดิมและเพิ่มร่มเงาเฉพาะจุดร้อนหรือจุดพักผ่อนกลางแจ้งของชุมชน`
+            );
+        }
+    }
+
+    const headline =
+        isHighHeat && isLowGreen && isHighBuiltup
+            ? "ปัจจัยหลัก: ร้อนสะสมสูง + พื้นที่สีเขียวน้อย + อาคารหนาแน่น"
+            : isHighHeat && isLowGreen
+                ? "ปัจจัยหลัก: ความร้อนสูงร่วมกับสัดส่วนพื้นที่สีเขียวน้อย"
+                : isHighBuiltup
+                    ? "ปัจจัยหลัก: ความหนาแน่นของอาคารและการสะสมความร้อน"
+                    : findings[0] || "ปัจจัยเชิงพื้นที่ของชุมชน";
+
+    const summary =
+        findings.length > 0
+            ? `จากข้อมูลเชิงพื้นที่ของ ${c.name} พบว่า${findings.join(" และ ")}`
+            : `ยังไม่มีข้อมูลตัวแปรครบถ้วนสำหรับวินิจฉัย ${c.name}`;
+
+    return {
+        headline,
+        summary,
+        recommendations: Array.from(new Set(recommendations)),
+    };
+}
+
+export function buildCommunityDiagnosisHtml(
+    c: Pick<
+        CommunityPriorityResult,
+        "name" | "lst300" | "lstP90_300" | "builtup300" | "greenRatio300" | "ndvi300" | "bldgCount300"
+    >,
+    sim?: TreeSimulationResult
+): string {
+    const diag = diagnoseCommunity(c, sim);
+    const recItems = diag.recommendations
+        .map((r) => `<li style="margin-bottom:4px;">${escHtml(r)}</li>`)
+        .join("");
+
+    return `
+    <div style="margin-top:8px; padding:10px; border-radius:8px; background:#f8fafc; border:1px solid #e2e8f0;">
+      <div style="font-weight:700; font-size:13px; color:#0f172a; margin-bottom:4px;">🔎 ${escHtml(diag.headline)}</div>
+      <p class="note" style="margin:0 0 6px; color:#334155;">${escHtml(diag.summary)}</p>
+      ${recItems
+            ? `<div style="font-weight:600; font-size:12px; color:#0f172a; margin-bottom:3px;">💡 ข้อเสนอแนะเบื้องต้นจากบริบทข้อมูล:</div>
+             <ul class="note" style="margin:0; padding-left:18px; color:#334155;">${recItems}</ul>`
+            : ""
+        }
+    </div>
+  `;
+}
 
 export function simulateTreeAddition(
     c: Pick<
@@ -90,15 +211,12 @@ export function simulateTreeAddition(
     const builtupSqm = Math.round(RADIUS_300_AREA_SQM * builtupFrac);
     const existingGreenSqm = Math.round(RADIUS_300_AREA_SQM * baseGreenFrac);
 
-    // พื้นที่เปิดโล่งที่ปลูกแทรกได้จริง = พื้นที่ทั้งหมด - พื้นที่อาคาร - พื้นที่สีเขียวเดิม (ขั้นต่ำ 10% ของบัฟเฟอร์)
     const openFrac = clamp(1 - builtupFrac - baseGreenFrac, 0.1, 0.95);
     const availableOpenSqm = Math.round(RADIUS_300_AREA_SQM * openFrac);
     const availableOpenPct = openFrac * 100;
 
-    // สัดส่วนพื้นที่เปิดโล่งของชุมชนที่ถูกเติมด้วยเรือนยอดไม้ใหม่
     const openAreaFillPct = clamp((addedCanopySqm / Math.max(availableOpenSqm, 1)) * 100, 0, 100);
 
-    // พื้นที่สีเขียวใหม่เทียบกับรัศมี 300 ม. ทั้งหมด
     const addedGreenFrac = clamp(addedCanopySqm / RADIUS_300_AREA_SQM, 0, openFrac);
     const simGreenFrac = clamp(baseGreenFrac + addedGreenFrac, 0, 0.98);
 
@@ -106,20 +224,17 @@ export function simulateTreeAddition(
     const simulatedGreenPct = simGreenFrac * 100;
     const deltaGreenPct = simulatedGreenPct - currentGreenPct;
 
-    // NDVI ปรับเพิ่มตามสัดส่วนเรือนยอดเทียบกับพื้นที่เปิดโล่งและช่องว่าง NDVI ที่เหลือ
     const baseNdvi = clamp(c.ndvi300 ?? 0.25, -0.2, 0.9);
     const ndviHeadroom = clamp(0.85 - baseNdvi, 0.1, 0.9);
     const deltaNdvi = clamp((openAreaFillPct / 100) * ndviHeadroom * 0.65, 0, 0.45);
     const simulatedNdvi = clamp(baseNdvi + deltaNdvi, -0.2, 0.95);
 
-    // ตัวคูณความไวต่อความร้อนจากตัวแปรจริงของชุมชนนั้น
     const lstVal = c.lst300 ?? 41.0;
     const lstP90Val = c.lstP90_300 ?? lstVal + 1.5;
     const heatExcessC = Math.max(0, lstVal - BASELINE_COOL_LST);
     const peakSpreadC = Math.max(0, lstP90Val - lstVal);
     const builtupFactor = 1 + builtupFrac * 0.8;
 
-    // สเกลความเย็นเชิงสมมติ (อิงความรุนแรงความร้อน × ความหนาแน่นอาคาร × สัดส่วนพื้นที่เปิดโล่งที่ถูกเติมร่มเงา)
     const coolingPotential =
         (openAreaFillPct / 100) * (heatExcessC * 0.24 + peakSpreadC * 0.16) * builtupFactor;
 
@@ -129,7 +244,6 @@ export function simulateTreeAddition(
     const simulatedLstMid =
         c.lst300 != null ? Number((c.lst300 - lstDropMid).toFixed(2)) : null;
 
-    // คะแนนความเปราะบางใหม่คำนวณซ้ำจากสมการดัชนีเดียวกัน (40% LST + 30% อาคาร + 30% ขาดแคลนสีเขียว)
     const newLst = simulatedLstMid ?? lstVal;
     const newHeatNorm = clamp(((newLst - 34) / 14) * 100, 0, 100);
     const bldgNorm = clamp(((c.builtup300 ?? 30) / 60) * 100, 0, 100);
@@ -301,7 +415,8 @@ export function buildCommunitySimulationHtml(
         <button type="button" class="mini-btn" id="drawer-compare-comm-btn" data-compare-id="${escHtml(c.id)}">⚖️ เปรียบเทียบกับชุมชนอื่น</button>
       </div>
       <p class="note" style="margin-top:8px;"><b>${escHtml(c.primaryDriver)}</b></p>
-      <p class="note" style="margin-top:4px;">${escHtml(c.simulationNote)}</p>
+      <div id="comm-diag-box">${buildCommunityDiagnosisHtml(c, sim)}</div>
+      <p class="note" style="margin-top:6px;">${escHtml(c.simulationNote)}</p>
     </div>
 
     <div class="d-card" id="comm-sim-box">
@@ -318,7 +433,10 @@ export function buildCommunitySimulationHtml(
 }
 
 function renderSimulationSummary(
-    c: Pick<CommunityPriorityResult, "name" | "lst300" | "lstP90_300" | "builtup300" | "greenRatio300" | "ndvi300">,
+    c: Pick<
+        CommunityPriorityResult,
+        "name" | "lst300" | "lstP90_300" | "builtup300" | "greenRatio300" | "ndvi300" | "bldgCount300"
+    >,
     s: TreeSimulationResult
 ): string {
     return `
@@ -422,12 +540,15 @@ export function bindCommunitySimulationEvents(
     if (!container) return;
     const btns = Array.from(container.querySelectorAll<HTMLButtonElement>("[data-sim-trees]"));
     const resultEl = container.querySelector<HTMLElement>("#comm-sim-result");
+    const diagEl = document.getElementById("comm-diag-box");
     if (resultEl) {
         btns.forEach((btn) => {
             btn.onclick = () => {
                 const trees = Number(btn.dataset.simTrees || 50);
+                const sim = simulateTreeAddition(c, trees);
                 btns.forEach((b) => b.classList.toggle("active", b === btn));
-                resultEl.innerHTML = renderSimulationSummary(c, simulateTreeAddition(c, trees));
+                resultEl.innerHTML = renderSimulationSummary(c, sim);
+                if (diagEl) diagEl.innerHTML = buildCommunityDiagnosisHtml(c, sim);
             };
         });
     }
@@ -536,7 +657,8 @@ export class CommunityStatsController {
               <span class="v-pill ${c.tier === "high" ? "danger" : c.tier === "moderate" ? "warn" : "cool"}">${c.score}/100</span>
             </div>
             <p class="note" style="margin:6px 0;">เขต${escHtml(c.district)} · LST ${fmtNum(c.lst300, 2)} °C · สีเขียว ${c.greenRatio300 != null ? fmtNum(c.greenRatio300 * 100, 1) + "%" : "—"}</p>
-            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            ${buildCommunityDiagnosisHtml(c)}
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
               <button type="button" class="mini-btn" data-jump-comm="${escHtml(c.id)}">🗺️ ไปที่ชุมชนบนแผนที่</button>
               <button type="button" class="mini-btn" data-sim-comm="${escHtml(c.id)}">🧪 จำลองเพิ่มต้นไม้</button>
               <button type="button" class="mini-btn" data-cmp-comm="${escHtml(c.id)}">⚖️ เปรียบเทียบ</button>
@@ -578,7 +700,8 @@ export class CommunityStatsController {
             <button type="button" class="mini-btn" data-jump-comm="${escHtml(target.id)}">🗺️ เปิดตำแหน่งบนแผนที่</button>
           </div>
         </h3>
-        <p class="note">
+        ${buildCommunityDiagnosisHtml(target, sim)}
+        <p class="note" style="margin-top:8px;">
           <b>หลักการจำลอง:</b> คำนวณจากตัวแปรจริงของ <b>${escHtml(target.name)}</b> (<code>lst_mean_300</code> = ${fmtNum(target.lst300, 2)} °C, <code>lst_p90_300</code> = ${fmtNum(target.lstP90_300, 2)} °C, <code>builtup_pct_300</code> = ${fmtNum(target.builtup300, 1)}%, <code>green_ratio_300</code> = ${target.greenRatio300 != null ? fmtNum(target.greenRatio300 * 100, 1) + "%" : "—"}) โดยหักพื้นที่อาคารและสีเขียวเดิมออกเพื่อหาพื้นที่เปิดโล่งที่ปลูกแทรกได้จริง (<b>${sim.availableOpenSqm.toLocaleString()} ตร.ม.</b>)
         </p>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin:10px 0;">
@@ -662,7 +785,8 @@ export class CommunityStatsController {
               <span class="v-pill ${a.tier === "high" ? "danger" : a.tier === "moderate" ? "warn" : "cool"}">${a.score}/100</span>
             </div>
             <p class="note" style="margin:4px 0 8px;">เขต${escHtml(a.district)} · สถานะ: ${escHtml(a.rawRiskLevel || "—")} · พื้นที่ว่างปลูกได้ ${simA.availableOpenSqm.toLocaleString()} ตร.ม.</p>
-            <p class="note">จำลอง +${this.selectedTrees} ต้น (ค่าสมมติ): สีเขียว <b>${simA.simulatedGreenPct.toFixed(2)}%</b> · คาด LST ลด <b>-${simA.lstDropLow} ถึง -${simA.lstDropHigh} °C</b></p>
+            ${buildCommunityDiagnosisHtml(a, simA)}
+            <p class="note" style="margin-top:8px;">จำลอง +${this.selectedTrees} ต้น (ค่าสมมติ): สีเขียว <b>${simA.simulatedGreenPct.toFixed(2)}%</b> · คาด LST ลด <b>-${simA.lstDropLow} ถึง -${simA.lstDropHigh} °C</b></p>
           </div>
           <div class="card" style="padding:12px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -670,7 +794,8 @@ export class CommunityStatsController {
               <span class="v-pill ${b.tier === "high" ? "danger" : b.tier === "moderate" ? "warn" : "cool"}">${b.score}/100</span>
             </div>
             <p class="note" style="margin:4px 0 8px;">เขต${escHtml(b.district)} · สถานะ: ${escHtml(b.rawRiskLevel || "—")} · พื้นที่ว่างปลูกได้ ${simB.availableOpenSqm.toLocaleString()} ตร.ม.</p>
-            <p class="note">จำลอง +${this.selectedTrees} ต้น (ค่าสมมติ): สีเขียว <b>${simB.simulatedGreenPct.toFixed(2)}%</b> · คาด LST ลด <b>-${simB.lstDropLow} ถึง -${simB.lstDropHigh} °C</b></p>
+            ${buildCommunityDiagnosisHtml(b, simB)}
+            <p class="note" style="margin-top:8px;">จำลอง +${this.selectedTrees} ต้น (ค่าสมมติ): สีเขียว <b>${simB.simulatedGreenPct.toFixed(2)}%</b> · คาด LST ลด <b>-${simB.lstDropLow} ถึง -${simB.lstDropHigh} °C</b></p>
           </div>
         </div>
 
@@ -801,9 +926,10 @@ export class CommunityStatsController {
             .map((c) => {
                 const pillClass = c.tier === "high" ? "danger" : c.tier === "moderate" ? "warn" : "cool";
                 const sim100 = simulateTreeAddition(c, 100);
+                const diag = diagnoseCommunity(c, sim100);
                 return `<tr>
           <td><b>#${c.rank}</b> <span class="note">(${c.score}/100)</span></td>
-          <td><b>${escHtml(c.name)}</b><br><span class="note">เขต${escHtml(c.district)} · ${escHtml(c.id)}</span></td>
+          <td><b>${escHtml(c.name)}</b><br><span class="note">เขต${escHtml(c.district)} · ${escHtml(c.id)}</span><br><span class="note">${escHtml(diag.headline)}</span></td>
           <td><span class="v-pill ${pillClass}">${escHtml(c.rawRiskLevel || c.tier)}</span><br><span class="note">สีวงกลม = ความเปราะบาง</span></td>
           <td><b>${fmtNum(c.lst300, 2)} °C</b><br><span class="note">p90: ${fmtNum(c.lstP90_300, 2)} °C</span></td>
           <td>${fmtNum(c.builtup300, 1)} %</td>
