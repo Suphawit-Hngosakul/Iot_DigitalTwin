@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Urban Heat Digital Twin</title>
+</head>
+
+<body>
+  <header>
+    <div class="brand">
+      <span class="brand-badge">3D</span>
+      <div>
+        <strong>Urban Heat Digital Twin</strong>
+        <span class="brand-sub">ระบบวิเคราะห์ความร้อนเมืองและสิ่งแวดล้อม</span>
+      </div>
+    </div>
+
+    <!-- สลับหมวดหมู่ 2 โปรเจกต์ -->
+    <div class="ws-switch" role="group" aria-label="เลือกโหมดโปรเจกต์">
+      <button id="mode-p2" data-ws="project2" class="active">Project 2 · IoT &amp; ความร้อน</button>
+      <button id="mode-cs341" data-ws="cs341">CS341 · ชุมชนเปราะบาง</button>
+    </div>
+
+    <!-- เมนูหลัก 3 แท็บ -->
+    <nav id="tabs">
+      <button data-tab="map" class="active">1. แผนที่ &amp; ชั้นข้อมูล</button>
+      <button data-tab="stats">2. วิเคราะห์ปัจจัยความร้อน</button>
+      <button id="tab-btn-iot" data-tab="iot">3. Realtime &amp; ข้อมูลย้อนหลัง IoT</button>
+    </nav>
+
+    <div class="globals period-cascade">
+      <label>รูปแบบ
+        <select id="period-kind" title="เลือกรูปแบบข้อมูล scene หรือ season">
+          <option value="scene">scene (รายวัน/รายฉาก)</option>
+          <option value="season">season (รายฤดูกาล)</option>
+        </select>
+      </label>
+      <label>ปี
+        <select id="period-year" title="เลือกปี"></select>
+      </label>
+      <label>เดือน
+        <select id="period-month" title="เลือกเดือน"></select>
+      </label>
+      <label>วัน / ช่วง
+        <select id="period-day" title="เลือกวันหรือช่วงเวลา"></select>
+      </label>
+      <label>โหมดเวลา
+        <select id="match">
+          <option value="all">ทุกเวลา (All)</option>
+          <option value="window">ช่วงแดดจัด (09:30–11:30)</option>
+        </select>
+      </label>
+    </div>
+  </header>
+
+  <main>
+    <!-- ① แผนที่ & ชั้นข้อมูล -->
+    <section id="tab-map" class="tab active">
+      <aside class="panel" id="map-panel">
+        <div class="panel-header">
+          <h2>ชั้นข้อมูลแผนที่ (Layers)</h2>
+          <select id="basemap" title="เลือกแผนที่พื้นหลัง">
+            <option value="osm">แผนที่ถนน (OSM)</option>
+            <option value="imagery">ภาพถ่ายดาวเทียม</option>
+          </select>
+        </div>
+
+        <!-- หมวด 1: พื้นที่ชุมชนและอาคาร -->
+        <details class="layer-card cat-amber" open>
+          <summary><span class="cat-dot amber"></span>1. พื้นที่ชุมชน &amp; อาคาร 3D</summary>
+          <div class="layer-body">
+            <!-- แสดงเฉพาะโหมด CS341 -->
+            <div id="grp-community" class="sub-block hidden">
+              <div class="sub-title">ชุมชนเปราะบาง 36 แห่ง (CS341)</div>
+              <label class="row"><input type="checkbox" id="comm-on" checked /> แสดงขอบเขตชุมชน (รัศมี 150 ม.)</label>
+              <div class="legend">
+                <span class="sw" style="background:#ef4444"></span>เปราะบางสูง
+                <span class="sw" style="background:#f59e0b"></span>ปานกลาง
+                <span class="sw" style="background:#10b981"></span>เปราะบางต่ำกว่าเกณฑ์
+              </div>
+              <p class="note" id="comm-note">กำลังโหลดข้อมูลชุมชน…</p>
+            </div>
+
+            <div id="grp-buildings" class="sub-block">
+              <div class="sub-title">
+                <span>อาคารรายหลัง 3D (building.shp)</span>
+                <button id="bldg-tilt" class="mini-btn">มุมมองบน 2D</button>
+              </div>
+              <label class="row"><input type="checkbox" id="bldg-on" checked /> แสดงตัวอาคาร</label>
+              <div class="legend">
+                <span class="sw" style="background:#fde68a"></span>1–2 ชั้น
+                <span class="sw" style="background:#f97316"></span>3–5 ชั้น
+                <span class="sw" style="background:#b91c1c"></span>6+ ชั้น
+              </div>
+              <p class="note" id="bldg-note">กำลังโหลดขอบเขตอาคาร…</p>
+            </div>
+          </div>
+        </details>
+
+        <!-- หมวด 2: ภาพถ่ายดาวเทียม 30 m -->
+        <details class="layer-card cat-coral" open>
+          <summary><span class="cat-dot coral"></span>2. อุณหภูมิพื้นผิว &amp; สิ่งปกคลุมดิน (30 m)</summary>
+          <div class="layer-body">
+            <p class="note" id="layer-note"></p>
+            <div id="layer-controls"></div>
+          </div>
+        </details>
+
+        <!-- หมวด 3: กริดวิเคราะห์ 90 m & จุดร้อน -->
+        <details class="layer-card cat-indigo" open>
+          <summary><span class="cat-dot indigo"></span>3. กริดวิเคราะห์ (90 m) &amp; จุดร้อนวิกฤต</summary>
+          <div class="layer-body">
+            <label class="row"><input type="checkbox" id="grid-on" /> เปิดตารางกริด 90 m</label>
+            <select id="grid-var" class="full-select">
+              <option value="lst_mean">อุณหภูมิพื้นผิว LST (°C)</option>
+              <option value="air_temp_mean">อุณหภูมิอากาศ IoT (°C)</option>
+              <option value="ndvi_mean">ดัชนีพืชพรรณ NDVI</option>
+              <option value="builtup_pct">ความหนาแน่นอาคาร (%)</option>
+              <option value="ndbi_mean">ดัชนีสิ่งปลูกสร้าง NDBI</option>
+              <option value="db_spl_mean">ระดับเสียงเฉลี่ย (dB)</option>
+            </select>
+            <div class="legend" id="grid-legend"></div>
+            <p class="note" id="grid-note"></p>
+
+            <div class="divider"></div>
+            <label class="row"><input type="checkbox" id="hot-on" /> ไฮไลต์จุดร้อนวิกฤต (Hot Spot Gi*)</label>
+            <div class="legend">
+              <span class="sw" style="background:#b2182b"></span>ร้อนจัด 99%
+              <span class="sw" style="background:#ef8a62"></span>ร้อน 95%
+              <span class="sw" style="background:#67a9cf"></span>เย็น 95%
+              <span class="sw" style="background:#2166ac"></span>เย็นจัด 99%
+            </div>
+            <p class="note" id="hot-note"></p>
+          </div>
+        </details>
+
+        <!-- หมวด 4: เส้นทางเดินวัดอากาศจริง (แสดงเฉพาะโหมด Project 2) -->
+        <details class="layer-card cat-sky" id="grp-iot-track" open>
+          <summary><span class="cat-dot sky"></span>4. เส้นทางเดินวัดอากาศจริง (IoT ย้อนหลัง)</summary>
+          <div class="layer-body">
+            <label class="row"><input type="checkbox" id="track-on" checked /> แสดงเส้นทางเดินบนแผนที่</label>
+            <div class="row2">
+              <select id="track-dev"></select>
+              <input type="date" id="track-date" value="2026-11-21" />
+            </div>
+            <label class="field-lbl">ระบายสีเส้นทางตาม
+              <select id="track-color" class="full-select">
+                <option value="temp_c_mean">อุณหภูมิอากาศจริง (°C)</option>
+                <option value="db_spl_mean">ระดับเสียง dB(SPL)</option>
+                <option value="dba_mean">ระดับเสียง dBA</option>
+              </select>
+            </label>
+            <div class="legend" id="track-legend"></div>
+            <p class="note" id="track-info"></p>
+            <div class="iot-now-box" id="iot-current-box">
+              <div>
+                <div><b>ตำแหน่งปัจจุบัน:</b> <span id="iot-now-text">กำลังตรวจสอบ…</span></div>
+                <small id="iot-now-meta">รอข้อมูลพิกัดล่าสุด</small>
+              </div>
+              <button type="button" id="iot-focus-now" class="mini-btn">🎯 ไปจุดปัจจุบัน</button>
+            </div>
+          </div>
+        </details>
+      </aside>
+
+      <!-- พื้นที่แผนที่ + Dashboard ด้านขวา -->
+      <div class="map-stage">
+        <div id="map"></div>
+        <div class="map-tip">คลิกที่ <b>ตัวอาคาร 3D</b> หรือ <b>พื้นที่บนแผนที่ (กริด 90 m)</b> เพื่อเปิด Dashboard
+          วิเคราะห์ด้านขวา</div>
+
+        <aside id="detail-drawer" class="detail-drawer hidden" aria-label="แผงข้อมูลวิเคราะห์รายละเอียด">
+          <div id="drawer-head" class="drawer-head theme-teal">
+            <div>
+              <span id="drawer-badge" class="drawer-badge">รายละเอียดพื้นที่</span>
+              <h3 id="drawer-title">—</h3>
+              <p id="drawer-sub">—</p>
+            </div>
+            <button id="drawer-close" class="drawer-close" title="ปิดหน้าต่าง">✕</button>
+          </div>
+          <div id="drawer-body" class="drawer-body"></div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ② วิเคราะห์ปัจจัยความร้อน -->
+    <section id="tab-stats" class="tab">
+      <div class="stats-toolbar">
+        <div id="headline" class="headline">กำลังวิเคราะห์ความร้อนในชุมชน…</div>
+        <div class="sub-nav">
+          <button id="sub-charts-btn" class="active">กราฟวิเคราะห์ปัจจัยความร้อน</button>
+          <button id="sub-research-btn">คำนวณ &amp; เทียบงานวิจัย UHI (เพิ่มเติม) →</button>
+        </div>
+      </div>
+
+      <!-- มุมมองย่อย 2.1: กราฟวิเคราะห์ -->
+      <div id="stats-sub-charts">
+        <div id="research-takeaways" class="takeaway-grid"></div>
+        <div id="s1-cards" class="cards"></div>
+
+        <div class="grid2">
+          <div class="card">
+            <h3>1. โซนเขียว vs โซนอาคารหนาแน่น ร้อนต่างกันกี่องศา? (S8)</h3>
+            <div class="chart" id="c-groups"></div>
+          </div>
+          <div class="card">
+            <h3>2. กราฟความสัมพันธ์รายบล็อก 90 m (Scatter + เส้นแนวโน้ม)
+              <select id="sc-x">
+                <option value="ndvi_mean">อุณหภูมิพื้นผิว (LST) vs พื้นที่สีเขียว (NDVI)</option>
+                <option value="builtup_pct">อุณหภูมิพื้นผิว (LST) vs ความหนาแน่นอาคาร (%)</option>
+                <option value="ndbi_mean">อุณหภูมิพื้นผิว (LST) vs สิ่งปลูกสร้าง (NDBI)</option>
+                <option value="air">อุณหภูมิอากาศคนเดินเท้า (IoT) vs พื้นผิว (LST)</option>
+              </select>
+            </h3>
+            <div class="chart" id="c-scatter"></div>
+          </div>
+          <div class="card">
+            <h3>3. ปัจจัยไหนมีอิทธิพลต่อความร้อนมากที่สุด? (Regression vs Random Forest)</h3>
+            <div class="chart" id="c-coef"></div>
+            <p class="note" id="s3-note"></p>
+          </div>
+          <div class="card">
+            <h3>4. เมทริกซ์สหสัมพันธ์ระหว่างตัวแปรทั้งหมด (Pearson r)</h3>
+            <div class="chart" id="c-corr"></div>
+          </div>
+          <div class="card">
+            <h3>5. การเปลี่ยนแปลงอุณหภูมิอากาศตลอด 24 ชม. (สถานีในสวน vs ริมถนน)</h3>
+            <div class="chart" id="c-s9"></div>
+          </div>
+          <div class="card">
+            <h3>6. การกระจุกตัวเชิงพื้นที่ (Spatial Autocorrelation · Moran's I)</h3>
+            <div id="s7" class="kv"></div>
+            <p class="note">ค่า Moran's I เข้าใกล้ +1 แปลว่าความร้อนกระจุกตัวเป็นกลุ่มก้อนตามลักษณะผังเมือง
+              ไม่ได้กระจายแบบสุ่ม</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- มุมมองย่อย 2.2: คำนวณ & เทียบงานวิจัย UHI -->
+      <div id="stats-sub-research" class="hidden">
+        <div class="res-wrap">
+          <div class="res-hero">
+            <div>
+              <h2>แบบจำลองการคำนวณ &amp; เปรียบเทียบงานวิจัย UHI</h2>
+              <p>เชื่อมโยงข้อมูล 3 มิติ ได้แก่ <b>สัณฐานอาคารจาก <code>building.shp</code></b> + <b>ภาพถ่ายดาวเทียม
+                  Landsat 8/9 (30 m)</b> + <b>การเดินวัดอากาศจริงด้วย IoT (1 Hz)</b> ลงบนกริดมาตรฐานขนาด <b>90 × 90
+                  เมตร</b></p>
+            </div>
+            <button id="sub-back-btn" class="back-btn">← กลับไปหน้ากราฟวิเคราะห์</button>
+          </div>
+
+          <div class="pipeline-cards">
+            <div class="p-card">
+              <span class="step-num">ขั้นที่ 1 · ข้อมูลตั้งต้น 3 แหล่ง</span>
+              <h4>Physical + Satellite + Human-level IoT</h4>
+              <ul>
+                <li><b>building.shp:</b> คำนวณสัดส่วนพื้นที่อาคาร (<code>builtup_pct</code>), จำนวนหลัง, จำนวนชั้นเฉลี่ย
+                  และ <code>FAR</code></li>
+                <li><b>Landsat 8/9 (30 m):</b> คำนวณอุณหภูมิพื้นผิว (<code>LST</code>), พืชพรรณ (<code>NDVI</code>)
+                  และสิ่งปลูกสร้าง (<code>NDBI</code>)</li>
+                <li><b>IoT Walking &amp; Stationary (1 Hz):</b> วัดอุณหภูมิอากาศจริง (<code>temp_c</code>), ความชื้น,
+                  แสง และเสียงระดับทางเดินเท้า</li>
+              </ul>
+            </div>
+            <div class="p-card">
+              <span class="step-num">ขั้นที่ 2 · การรวมข้อมูลเชิงพื้นที่</span>
+              <h4>90 m Spatial Grid Aggregation</h4>
+              <ul>
+                <li>กำหนดขนาดกริด <b>90 × 90 ม.</b> (3×3 พิกเซล Landsat) เพื่อลดความคลาดเคลื่อนของพิกัด GPS ขณะเดิน</li>
+                <li>คำนวณค่าเฉลี่ยถ่วงน้ำหนักพื้นที่สำหรับ <code>building.shp</code> และค่าเฉลี่ยดาวเทียมในแต่ละเซลล์
+                </li>
+                <li>จับคู่ข้อมูล IoT แบบ <b>Window (09:30–11:30 น.)</b> เพื่อให้ตรงเวลาที่ดาวเทียมโคจรผ่านพื้นที่ศึกษา
+                </li>
+              </ul>
+            </div>
+            <div class="p-card">
+              <span class="step-num">ขั้นที่ 3 · แบบจำลองอธิบายความร้อน</span>
+              <h4>Statistical &amp; Spatial Modeling</h4>
+              <ul>
+                <li><b>Multiple Regression (S3/S4):</b> หาค่าสัมประสิทธิ์มาตรฐาน (β*) เพื่อเทียบน้ำหนักของ NDVI vs อาคาร
+                </li>
+                <li><b>Random Forest Importance (S5):</b> จับความสัมพันธ์แบบไม่เป็นเส้นตรง (Non-linear) ของสัณฐานเมือง
+                </li>
+                <li><b>Getis-Ord Gi* &amp; Moran's I:</b> ระบุพิกัดกลุ่มอาคารที่เป็น "เกาะความร้อนวิกฤต"
+                  อย่างมีนัยสำคัญทางสถิติ</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card res-section">
+            <h3>ตารางเปรียบเทียบผลลัพธ์จากข้อมูลของเรา (<span id="res-period-label">กำลังโหลด…</span>) เทียบกับงานวิจัย
+              UHI</h3>
+            <p class="note">ค่าในคอลัมน์ <b>"ผลที่คำนวณได้จากระบบเรา"</b> อัปเดตอัตโนมัติตามช่วงเวลาที่เลือกด้านบน
+              เพื่อใช้เขียนอภิปรายผล (Discussion)</p>
+            <div class="table-scroll">
+              <table class="res-table">
+                <thead>
+                  <tr>
+                    <th>ประเด็นการอธิบายความร้อน</th>
+                    <th>วิธีคำนวณ / ตัวชี้วัด</th>
+                    <th>ผลที่คำนวณได้จากระบบเรา</th>
+                    <th>เกณฑ์อ้างอิงจากงานวิจัย UHI</th>
+                    <th>การตีความผลสำหรับชุมชน</th>
+                  </tr>
+                </thead>
+                <tbody id="res-comparison-body"></tbody>
+              </table>
+            </div>
+            <div id="res-interpretation" class="interp-box"></div>
+          </div>
+
+          <div class="card res-section">
+            <h3>สรุปสูตรและวิธีการคำนวณทางวิชาการ (Calculation Reference)</h3>
+            <div class="table-scroll">
+              <table class="res-table">
+                <thead>
+                  <tr>
+                    <th>โมดูล / สมการ</th>
+                    <th>สูตร / อัลกอริทึม</th>
+                    <th>ความหมายในการอธิบายความร้อนชุมชน</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><b>ความหนาแน่นอาคาร (building.shp)</b></td>
+                    <td>
+                      <code>builtup_pct = (Σ Area_bldg / 8100 m²) × 100</code><br><code>FAR = Σ (Area_bldg × Floors) / 8100 m²</code>
+                    </td>
+                    <td>สะท้อนมวลความร้อน (Thermal Mass) และการบังลม (Wind Blocking) ของกลุ่มอาคารในบล็อก 90×90 ม.</td>
+                  </tr>
+                  <tr>
+                    <td><b>ดัชนีพืชพรรณ &amp; สิ่งปลูกสร้าง</b></td>
+                    <td><code>NDVI = (NIR - Red) / (NIR + Red)</code><br><code>NDBI = (SWIR - NIR) / (SWIR + NIR)</code>
+                    </td>
+                    <td>วัดความสามารถในการคายระเหยน้ำลดความร้อน (Evapotranspiration) เทียบกับพื้นผิวคอนกรีต/หลังคา</td>
+                  </tr>
+                  <tr>
+                    <td><b>แบบจำลองอธิบาย LST (S3)</b></td>
+                    <td><code>LST = β₀ + β₁(NDVI) + β₂(NDBI) + β₃(builtup_pct) + ε</code><br>เปรียบเทียบค่ามาตรฐาน
+                      <code>β* = β · (SD_x / SD_y)</code>
+                    </td>
+                    <td>บอกได้ว่าหากเพิ่มพื้นที่สีเขียว 1 SD หรือลดความหนาแน่นอาคาร 1 SD
+                      จะลดอุณหภูมิพื้นผิวได้กี่ส่วนเบี่ยงเบนมาตรฐาน</td>
+                  </tr>
+                  <tr>
+                    <td><b>แบบจำลองอุณหภูมิอากาศจริง (S4)</b></td>
+                    <td><code>AirTemp_IoT = β₀ + β₁(LST) + β₂(NDVI) + β₃(builtup_pct) + ε</code></td>
+                    <td>เชื่อมความร้อนจากภาพถ่ายดาวเทียมลงสู่ระดับความสูง 1.5 ม. ที่คนเดินเท้าในชุมชนรู้สึกจริง
+                      (Microclimate Coupling)</td>
+                  </tr>
+                  <tr>
+                    <td><b>ดัชนีจุดร้อนชุมชน (Getis-Ord Gᵢ*)</b></td>
+                    <td>
+                      <code>Gᵢ* = [Σ wᵢⱼxⱼ - X̄ Σ wᵢⱼ] / [S · √((n Σ wᵢⱼ² - (Σ wᵢⱼ)²)/(n-1))]</code><br>รัศมีเพื่อนบ้าน
+                      <code>d = 300 m</code>
+                    </td>
+                    <td>คัดกรองเฉพาะกลุ่มอาคารที่ร้อนสูงต่อเนื่องเป็นบริเวณกว้าง (Hot Spot 95%/99%)
+                      ไม่ใช่จุดร้อนโดดเดี่ยว</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- มุมมองย่อย 2.3: วิเคราะห์ความเปราะบาง จำลองสมมติฐาน และเปรียบเทียบ 2 ชุมชน (CS341) -->
+      <div id="cs341-stats-view" class="hidden">
+        <div class="res-wrap">
+          <div class="res-hero" style="background: linear-gradient(135deg, #b91c1c, #d97706); margin-bottom: 12px;">
+            <div>
+              <h2>วิเคราะห์ความเปราะบาง จำลองสมมติฐาน และเปรียบเทียบชุมชน (CS341)</h2>
+              <p>สีวงกลมบนแผนที่แสดง <b>ระดับความเปราะบาง (ไม่ใช่ °C)</b> ส่วนการจำลองเพิ่มต้นไม้ 10–200 ต้นเป็น
+                <b>ค่าสมมติเชิงจำลอง</b> อิงตัวแปรของแต่ละชุมชน (ยังไม่ได้ลงพื้นที่จริง)
+              </p>
+            </div>
+          </div>
+
+          <div id="cs341-kpis" class="cards"></div>
+
+          <div id="cs341-compare-dashboard"></div>
+
+          <div id="cs341-sim-dashboard"></div>
+
+          <h3 style="margin: 14px 0 8px; font-size: 14.5px;">3 ชุมชนคะแนนความเปราะบางสูงสุดในดัชนี</h3>
+          <div id="cs341-top-spotlight" class="takeaway-grid"></div>
+
+          <div class="grid2" style="margin-bottom: 12px;">
+            <div class="card">
+              <h3>1. 10 อันดับชุมชนที่มีคะแนนความเปราะบางสูงสุด</h3>
+              <div class="chart" id="cs341-c-bar"></div>
+            </div>
+            <div class="card">
+              <h3>2. ความหนาแน่นอาคาร vs ความร้อน LST (ขนาดจุด = ความขาดแคลนพื้นที่สีเขียว)</h3>
+              <div class="chart" id="cs341-c-scatter"></div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <h3>
+              <span>3. ตารางชุมชน (เรียงจากเปราะบางสุด → น้อยสุด)</span>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <select id="cs341-filter-district">
+                  <option value="all">ทุกเขตพื้นที่</option>
+                </select>
+                <select id="cs341-filter-tier">
+                  <option value="all">ทุกระดับความเปราะบาง</option>
+                  <option value="high">เปราะบางสูง</option>
+                  <option value="moderate">ปานกลาง</option>
+                  <option value="low">เปราะบางต่ำกว่าเกณฑ์</option>
+                </select>
+              </div>
+            </h3>
+            <div class="table-scroll">
+              <table class="res-table">
+                <thead>
+                  <tr>
+                    <th>อันดับ</th>
+                    <th>ชื่อชุมชน / เขต</th>
+                    <th>ระดับความเปราะบาง</th>
+                    <th>LST (300 ม.)</th>
+                    <th>อาคาร (%)</th>
+                    <th>พื้นที่สีเขียว</th>
+                    <th>ดูบนแผนที่ · จำลอง · เปรียบเทียบ</th>
+                  </tr>
+                </thead>
+                <tbody id="cs341-ranking-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ③ Realtime & ข้อมูลย้อนหลัง IoT (ซ่อนอัตโนมัติในโหมด CS341) -->
+    <section id="tab-iot" class="tab">
+      <div class="stats-toolbar">
+        <div class="live-status-wrap">
+          <span id="live-status-pill" class="live-pill connecting">● กำลังเชื่อมต่อ…</span>
+          <span id="live-last-ts" class="note">อัปเดตล่าสุด: —</span>
+        </div>
+        <div class="sub-nav">
+          <button id="iot-mode-live" class="active">🔴 Realtime สด (Live Stream)</button>
+          <button id="iot-mode-hist">📅 ข้อมูลย้อนหลัง (Historical)</button>
+        </div>
+      </div>
+
+      <!-- มุมมองย่อย 3.1: Realtime IoT สด -->
+      <div id="iot-sub-live">
+        <div class="iot-toolbar">
+          <div class="iot-filters">
+            <label>อุปกรณ์ตรวจวัด
+              <select id="live-dev"></select>
+            </label>
+            <label>แหล่งสัญญาณ
+              <select id="live-source-mode">
+                <option value="auto">อัตโนมัติ (AWS Live / Local Demo)</option>
+                <option value="demo">จำลองข้อมูลสด (Demo Stream)</option>
+              </select>
+            </label>
+          </div>
+          <div class="live-actions">
+            <button id="live-pause-btn" class="mini-btn" type="button">⏸ หยุดชั่วคราว</button>
+            <button id="live-clear-btn" class="mini-btn" type="button">ล้างกราฟ</button>
+          </div>
+        </div>
+
+        <div class="cards" id="live-kpis">
+          <div class="kpi live-kpi warm">
+            <div class="l">อุณหภูมิอากาศจริง (IoT Air)</div>
+            <div class="v" id="lv-temp">— °C</div>
+            <div class="l" id="lv-temp-badge">รอรับสัญญาณ…</div>
+          </div>
+          <div class="kpi live-kpi indigo">
+            <div class="l">ระดับเสียงสภาพแวดล้อม dB(SPL)</div>
+            <div class="v" id="lv-spl">— dB</div>
+            <div class="l" id="lv-dba">dBA: — · สถานะ: —</div>
+          </div>
+          <div class="kpi live-kpi blue">
+            <div class="l">ความชื้นสัมพัทธ์ (Humidity)</div>
+            <div class="v" id="lv-hum">— %</div>
+            <div class="l" id="lv-dew">ความชื้นอากาศระดับทางเดินเท้า</div>
+          </div>
+          <div class="kpi live-kpi amber">
+            <div class="l">ความเข้มแสง &amp; พิกัด GPS</div>
+            <div class="v" id="lv-lux">— lux</div>
+            <div class="l" id="lv-gps">พิกัด: — · บล็อก: —</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 12px;">
+          <h3>กราฟสดระดับเสียง dB(SPL) &amp; dBA <small>(60 จุดล่าสุด)</small></h3>
+          <div class="chart sm" id="live-c-sound"></div>
+        </div>
+
+        <div class="grid2">
+          <div class="card">
+            <h3>กราฟสดอุณหภูมิอากาศจริง (°C) <small>(60 จุดล่าสุด)</small></h3>
+            <div class="chart" id="live-c-temp"></div>
+          </div>
+          <div class="card">
+            <h3>กราฟสดความชื้นสัมพัทธ์ (%) <small>(60 จุดล่าสุด)</small></h3>
+            <div class="chart" id="live-c-hum"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- มุมมองย่อย 3.2: ข้อมูลย้อนหลัง -->
+      <div id="iot-sub-hist" class="hidden">
+        <div class="iot-toolbar">
+          <div class="iot-filters">
+            <label>อุปกรณ์ตรวจวัด
+              <select id="iot-dev"></select>
+            </label>
+            <label>วันที่
+              <input type="date" id="iot-date" value="2026-11-21" />
+            </label>
+            <label>ช่วงเวลา
+              <select id="iot-window">
+                <option value="all">ทั้งวัน (00:00–24:00)</option>
+                <option value="morning">ช่วงเช้า (06:00–12:00)</option>
+                <option value="afternoon">ช่วงบ่าย (12:00–18:00)</option>
+                <option value="evening">ช่วงค่ำ (18:00–24:00)</option>
+              </select>
+            </label>
+            <label>ความละเอียด
+              <select id="iot-interval">
+                <option value="1min">รายนาที (1 min)</option>
+                <option value="1s">รายวินาที (1 sec · สูงสุด 6 ชม.)</option>
+              </select>
+            </label>
+            <label class="row"><input type="checkbox" id="iot-dba" /> ซ้อนเส้น dBA</label>
+          </div>
+          <button id="iot-export" class="export-btn">ดาวน์โหลด CSV</button>
+        </div>
+
+        <div id="iot-kpis" class="cards"></div>
+
+        <div class="grid-iot">
+          <div class="card span2">
+            <h3>ระดับเสียง dB(SPL) ย้อนหลัง <small>(เส้นเฉลี่ย และแถบช่วงต่ำสุด–สูงสุด)</small></h3>
+            <div class="chart" id="c-spl"></div>
+          </div>
+          <div class="card">
+            <h3>อุณหภูมิอากาศจริง (°C)</h3>
+            <div class="chart" id="c-temp"></div>
+          </div>
+          <div class="card">
+            <h3>ความชื้นสัมพัทธ์ (%)</h3>
+            <div class="chart sm" id="c-hum"></div>
+          </div>
+          <div class="card">
+            <h3>ความเข้มแสง (lux)</h3>
+            <div class="chart sm" id="c-lux"></div>
+          </div>
+          <div class="card">
+            <h3>ความสมบูรณ์ของข้อมูลรายชั่วโมง (%)</h3>
+            <div class="chart sm" id="c-quality"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/src/main.ts"></script>
+  <script type="module" src="/src/iot-live.ts"></script>
+</body>
+
+</html>

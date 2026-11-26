@@ -171,3 +171,31 @@ module "analytics" {
   trigger_enabled   = var.analytics_trigger_enabled
   weekly_schedule   = var.analytics_weekly_schedule
 }
+
+# Auto-sync API & WebSocket endpoints to the web S3 bucket's runtime config.json (#35)
+locals {
+  web_hub_live_url = join("", compact([one(module.relay[*].hub_live_url)]))
+}
+
+resource "terraform_data" "sync_web_config" {
+  triggers_replace = [
+    module.api.api_url,
+    local.web_hub_live_url,
+  ]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      ACCT=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
+      BUCKET="iot-twin-web-$ACCT"
+      if [ -n "$ACCT" ] && aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+        printf '{"api_url":"%s","hub_live_url":"%s","deploy_id":"%s"}\n' \
+          "${module.api.api_url}" \
+          "${local.web_hub_live_url}" \
+          "$(date -u +%Y%m%dT%H%M%SZ)" > /tmp/config.json
+        aws s3 cp /tmp/config.json "s3://$BUCKET/config.json" \
+          --cache-control "no-store, no-cache, must-revalidate" \
+          --content-type "application/json"
+      fi
+    EOT
+  }
+}
