@@ -34,6 +34,11 @@ async function bootstrap() {
     () => currentMatch,
     (features) => {
       commStatsCtrl.setCommunities(features);
+    },
+    (communityId) => {
+      switchProjectMode("cs341");
+      showTab("stats");
+      commStatsCtrl.openCompareWith(communityId);
     }
   );
 

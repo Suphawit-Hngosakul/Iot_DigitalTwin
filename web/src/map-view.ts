@@ -284,14 +284,17 @@ export class MapController {
   pitched = true;
   private drawerChart: echarts.ECharts | null = null;
   private onCommunitiesLoaded?: (features: GeoJSON.Feature[]) => void;
+  private onCompareCommunity?: (communityId: string) => void;
 
   constructor(
     private getPeriod: () => string | null,
     private setPeriod: (p: string, periods: LayersResponse["periods"]) => void,
     private getMatch: () => "all" | "window",
-    onCommunitiesLoaded?: (features: GeoJSON.Feature[]) => void
+    onCommunitiesLoaded?: (features: GeoJSON.Feature[]) => void,
+    onCompareCommunity?: (communityId: string) => void
   ) {
     this.onCommunitiesLoaded = onCommunitiesLoaded;
+    this.onCompareCommunity = onCompareCommunity;
     this.map = new maplibregl.Map({
       container: "map",
       style: {
@@ -608,7 +611,7 @@ export class MapController {
     const pct = (v: unknown) => (v != null && v !== "" ? `${fmt(Number(v) * 100, 1)} %` : "—");
 
     const html = `
-      ${buildCommunitySimulationHtml(evaluated, 30)}
+      ${buildCommunitySimulationHtml(evaluated, 50)}
       ${buildVerdictHtml(props.lst_mean_300, null, false)}
 
       <div class="d-kpis">
@@ -662,7 +665,14 @@ export class MapController {
       sub: `เขต${String(props.district || "—")} · ${evaluated.tierLabel}`,
       html,
       onReady: () => {
-        bindCommunitySimulationEvents(document.getElementById("comm-sim-box"), evaluated);
+        bindCommunitySimulationEvents(
+          document.getElementById("comm-sim-box"),
+          evaluated,
+          (targetId) => {
+            this.closeDrawer();
+            if (this.onCompareCommunity) this.onCompareCommunity(targetId);
+          }
+        );
 
         const el = document.getElementById("drawer-chart");
         if (!el) return;

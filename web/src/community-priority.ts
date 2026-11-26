@@ -55,6 +55,7 @@ export interface TreeSimulationResult {
     simulatedLstMid: number | null;
 }
 
+export const TREE_CHOICES = [10, 30, 50, 100, 200] as const;
 const CANOPY_SQM_PER_TREE = 25; // เรือนยอดไม้ยืนต้นเขตเมืองโตเต็มวัย (~รัศมี 2.8 ม. ≈ 25 ตร.ม./ต้น)
 const RADIUS_300_AREA_SQM = Math.round(Math.PI * 300 * 300); // 282,743 ตร.ม.
 const BASELINE_COOL_LST = 35.0; // อุณหภูมิพื้นผิวอ้างอิงโซนระบายความร้อนดี (°C)
@@ -105,10 +106,10 @@ export function simulateTreeAddition(
     const simulatedGreenPct = simGreenFrac * 100;
     const deltaGreenPct = simulatedGreenPct - currentGreenPct;
 
-    // NDVI ปรับเพิ่มตามสัดส่วนเรือนยอดเทียบกับพื้นที่เปิดโล่งและช่องว่าง NDVI ที่เหลือ (1 - NDVI_current)
+    // NDVI ปรับเพิ่มตามสัดส่วนเรือนยอดเทียบกับพื้นที่เปิดโล่งและช่องว่าง NDVI ที่เหลือ
     const baseNdvi = clamp(c.ndvi300 ?? 0.25, -0.2, 0.9);
     const ndviHeadroom = clamp(0.85 - baseNdvi, 0.1, 0.9);
-    const deltaNdvi = clamp((openAreaFillPct / 100) * ndviHeadroom * 0.65, 0, 0.35);
+    const deltaNdvi = clamp((openAreaFillPct / 100) * ndviHeadroom * 0.65, 0, 0.45);
     const simulatedNdvi = clamp(baseNdvi + deltaNdvi, -0.2, 0.95);
 
     // ตัวคูณความไวต่อความร้อนจากตัวแปรจริงของชุมชนนั้น
@@ -120,10 +121,10 @@ export function simulateTreeAddition(
 
     // สเกลความเย็นเชิงสมมติ (อิงความรุนแรงความร้อน × ความหนาแน่นอาคาร × สัดส่วนพื้นที่เปิดโล่งที่ถูกเติมร่มเงา)
     const coolingPotential =
-        (openAreaFillPct / 100) * (heatExcessC * 0.22 + peakSpreadC * 0.15) * builtupFactor;
+        (openAreaFillPct / 100) * (heatExcessC * 0.24 + peakSpreadC * 0.16) * builtupFactor;
 
-    const lstDropLow = Number(clamp(coolingPotential * 0.7, 0.02, 1.5).toFixed(2));
-    const lstDropHigh = Number(clamp(coolingPotential * 1.35, 0.04, 2.5).toFixed(2));
+    const lstDropLow = Number(clamp(coolingPotential * 0.7, 0.02, 1.8).toFixed(2));
+    const lstDropHigh = Number(clamp(coolingPotential * 1.35, 0.05, 3.0).toFixed(2));
     const lstDropMid = Number(((lstDropLow + lstDropHigh) / 2).toFixed(2));
     const simulatedLstMid =
         c.lst300 != null ? Number((c.lst300 - lstDropMid).toFixed(2)) : null;
@@ -209,7 +210,7 @@ export function evaluateAllCommunities(
         let theme: "red" | "amber" | "teal" = "amber";
         if (score >= 65 || rawRiskLevel === "high") {
             tier = "high";
-            tierLabel = "ความเปราะบางสูง (ควรพิจารณาก่อน)";
+            tierLabel = "ความเปราะบางสูง";
             theme = "red";
         } else if (score < 50 || rawRiskLevel === "low") {
             tier = "low";
@@ -228,7 +229,7 @@ export function evaluateAllCommunities(
 
         const primaryDriver = `ปัจจัยเด่นในดัชนี: ${drivers[0].label}`;
         const simulationNote =
-            "หมายเหตุ: การจำลองนี้คำนวณจากตัวแปรจริงของชุมชนนี้ (พื้นที่อาคาร, พื้นที่สีเขียวเดิม, LST และ p90) เพื่อเปรียบเทียบสมมติฐาน ยังไม่ใช่ผลตรวจวัดจริงหน้างาน";
+            "หมายเหตุ: สีวงกลมบนแผนที่แสดงระดับความเปราะบาง (ไม่ใช่ °C) และตัวเลขการจำลองเพิ่มต้นไม้เป็น 'ค่าสมมติเชิงจำลอง' จากข้อมูลชั้นพื้นที่ ยังไม่ได้ลงพื้นที่จริง";
 
         return {
             id,
@@ -267,18 +268,15 @@ export function evaluateAllCommunities(
 
 export function buildCommunitySimulationHtml(
     c: CommunityPriorityResult,
-    defaultTrees = 30
+    defaultTrees = 50
 ): string {
-    const treeChoices = [10, 20, 30, 40, 50];
     const sim = simulateTreeAddition(c, defaultTrees);
     const badgeClass = c.tier === "high" ? "danger" : c.tier === "moderate" ? "warn" : "cool";
 
-    const buttonsHtml = treeChoices
-        .map(
-            (n) =>
-                `<button type="button" class="mini-btn ${n === defaultTrees ? "active" : ""}" data-sim-trees="${n}">+${n} ต้น</button>`
-        )
-        .join(" ");
+    const buttonsHtml = TREE_CHOICES.map(
+        (n) =>
+            `<button type="button" class="mini-btn ${n === defaultTrees ? "active" : ""}" data-sim-trees="${n}">+${n} ต้น</button>`
+    ).join(" ");
 
     return `
     <div class="d-card">
@@ -291,7 +289,7 @@ export function buildCommunitySimulationHtml(
               <div class="sub">อันดับ #${c.rank} จาก ${c.total} ชุมชน</div>
             </div>
             <div class="d-kpi blue">
-              <div class="lbl">สถานะในชั้นข้อมูล</div>
+              <div class="lbl">สถานะความเปราะบาง</div>
               <div class="val" style="font-size:14px;">${escHtml(c.rawRiskLevel || "—")}</div>
               <div class="sub">สีวงกลม = ความเปราะบาง ไม่ใช่ °C</div>
             </div>
@@ -299,12 +297,15 @@ export function buildCommunitySimulationHtml(
           <span class="v-pill ${badgeClass}">${escHtml(c.tierLabel)}</span>
         </div>
       </div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
+        <button type="button" class="mini-btn" id="drawer-compare-comm-btn" data-compare-id="${escHtml(c.id)}">⚖️ เปรียบเทียบกับชุมชนอื่น</button>
+      </div>
       <p class="note" style="margin-top:8px;"><b>${escHtml(c.primaryDriver)}</b></p>
       <p class="note" style="margin-top:4px;">${escHtml(c.simulationNote)}</p>
     </div>
 
     <div class="d-card" id="comm-sim-box">
-      <h4>🧪 จำลองสมมติฐานการเพิ่มต้นไม้ (อิงตัวแปรจริงของชุมชนนี้)</h4>
+      <h4>🧪 จำลองสมมติฐานการเพิ่มต้นไม้ (10–200 ต้น · ค่าสมมติ)</h4>
       <p class="note">เลือกจำนวนต้นไม้สมมติ (เรือนยอดเฉลี่ย ~${CANOPY_SQM_PER_TREE} ตร.ม./ต้น) เพื่อคำนวณเทียบกับพื้นที่เปิดโล่งจริงของชุมชน:</p>
       <div style="display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 10px;" id="comm-sim-btns">
         ${buttonsHtml}
@@ -409,44 +410,72 @@ function renderSimulationSummary(
         </div>
       </div>
     </details>
-    <p class="note" style="margin-top:6px;">⚠️ <b>ข้อจำกัดของแบบจำลอง:</b> ตัวเลขทั้งหมดคำนวณจากตัวแปรเชิงพื้นที่ของชุมชนนี้เพื่อใช้เปรียบเทียบสมมติฐานเท่านั้น ยังไม่รวมปัจจัยทิศทางลม ความสูงตึกบังแดด และการสำรวจพื้นที่ว่างจริงหน้างาน</p>
+    <p class="note" style="margin-top:6px;">⚠️ <b>ค่าสมมติเท่านั้น:</b> ตัวเลขนี้เป็นแบบจำลองจากตัวแปรเชิงพื้นที่ของชุมชน ยังไม่รวมทิศทางลม ความสูงตึกบังแดด และการสำรวจหน้างานจริง</p>
   `;
 }
 
 export function bindCommunitySimulationEvents(
     container: HTMLElement | null,
-    c: CommunityPriorityResult
+    c: CommunityPriorityResult,
+    onCompareClick?: (communityId: string) => void
 ): void {
     if (!container) return;
     const btns = Array.from(container.querySelectorAll<HTMLButtonElement>("[data-sim-trees]"));
     const resultEl = container.querySelector<HTMLElement>("#comm-sim-result");
-    if (!resultEl) return;
+    if (resultEl) {
+        btns.forEach((btn) => {
+            btn.onclick = () => {
+                const trees = Number(btn.dataset.simTrees || 50);
+                btns.forEach((b) => b.classList.toggle("active", b === btn));
+                resultEl.innerHTML = renderSimulationSummary(c, simulateTreeAddition(c, trees));
+            };
+        });
+    }
 
-    btns.forEach((btn) => {
-        btn.onclick = () => {
-            const trees = Number(btn.dataset.simTrees || 30);
-            btns.forEach((b) => b.classList.toggle("active", b === btn));
-            resultEl.innerHTML = renderSimulationSummary(c, simulateTreeAddition(c, trees));
-        };
-    });
+    const compareBtn = document.getElementById("drawer-compare-comm-btn");
+    if (compareBtn && onCompareClick) {
+        compareBtn.onclick = () => onCompareClick(c.id);
+    }
 }
 
 export class CommunityStatsController {
     private items: CommunityPriorityResult[] = [];
     private selectedId: string | null = null;
-    private selectedTrees = 30;
+    private compareId: string | null = null;
+    private selectedTrees = 50;
     private barChart: echarts.ECharts | null = null;
     private scatterChart: echarts.ECharts | null = null;
+    private compareChart: echarts.ECharts | null = null;
     private onJumpToMap?: (communityId: string) => void;
 
     setJumpHandler(handler: (communityId: string) => void) {
         this.onJumpToMap = handler;
     }
 
+    openCompareWith(communityId: string) {
+        if (!this.items.length) return;
+        const found = this.items.find((x) => x.id === communityId);
+        if (found) {
+            this.selectedId = found.id;
+            const other = this.items.find((x) => x.id !== found.id);
+            if (!this.compareId || this.compareId === found.id) {
+                this.compareId = other ? other.id : found.id;
+            }
+        }
+        this.render();
+        document.getElementById("cs341-compare-dashboard")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
     setCommunities(features: { properties?: Record<string, unknown> | null }[]) {
         this.items = evaluateAllCommunities(features);
-        if (!this.selectedId && this.items.length > 0) {
-            this.selectedId = this.items[0].id;
+        if (this.items.length > 0) {
+            if (!this.selectedId || !this.items.some((x) => x.id === this.selectedId)) {
+                this.selectedId = this.items[0].id;
+            }
+            if (!this.compareId || !this.items.some((x) => x.id === this.compareId)) {
+                const fallback = this.items[this.items.length - 1];
+                this.compareId = fallback ? fallback.id : this.items[0].id;
+            }
         }
         this.render();
     }
@@ -458,6 +487,7 @@ export class CommunityStatsController {
         const distSel = document.getElementById("cs341-filter-district") as HTMLSelectElement | null;
         const tierSel = document.getElementById("cs341-filter-tier") as HTMLSelectElement | null;
         const simPanelEl = document.getElementById("cs341-sim-dashboard");
+        const cmpPanelEl = document.getElementById("cs341-compare-dashboard");
 
         if (!kpisEl || !tbody) return;
 
@@ -466,6 +496,7 @@ export class CommunityStatsController {
             tbody.innerHTML = "";
             if (spotlightEl) spotlightEl.innerHTML = "";
             if (simPanelEl) simPanelEl.innerHTML = "";
+            if (cmpPanelEl) cmpPanelEl.innerHTML = "";
             return;
         }
 
@@ -488,10 +519,10 @@ export class CommunityStatsController {
         const top1 = this.items[0];
 
         kpisEl.innerHTML = `
-      <div class="kpi"><div class="l">ชุมชนทั้งหมด</div><div class="v">${this.items.length}</div><div class="l">จัดอันดับตามคะแนนความเปราะบาง</div></div>
+      <div class="kpi"><div class="l">ชุมชนทั้งหมด</div><div class="v">${this.items.length}</div><div class="l">เรียงลำดับจากเปราะบางมากสุด (#1) → น้อยสุด</div></div>
       <div class="kpi"><div class="l">กลุ่มเปราะบางสูง</div><div class="v">${highCount}</div><div class="l">สีวงกลม = ความเปราะบาง (ไม่ใช่ °C)</div></div>
       <div class="kpi"><div class="l">คะแนนความเปราะบางเฉลี่ย</div><div class="v">${avgScore}</div><div class="l">จาก 100 คะแนน (ดัชนี 3 มิติ)</div></div>
-      <div class="kpi"><div class="l">อันดับ #1 ปัจจุบัน</div><div class="v" style="font-size:15px;">${escHtml(top1.name)}</div><div class="l">คะแนน ${top1.score}/100 · LST ${fmtNum(top1.lst300, 1)} °C</div></div>
+      <div class="kpi"><div class="l">เปราะบางสูงสุด (#1)</div><div class="v" style="font-size:15px;">${escHtml(top1.name)}</div><div class="l">คะแนน ${top1.score}/100 · LST ${fmtNum(top1.lst300, 1)} °C</div></div>
     `;
 
         if (spotlightEl) {
@@ -508,6 +539,7 @@ export class CommunityStatsController {
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
               <button type="button" class="mini-btn" data-jump-comm="${escHtml(c.id)}">🗺️ ไปที่ชุมชนบนแผนที่</button>
               <button type="button" class="mini-btn" data-sim-comm="${escHtml(c.id)}">🧪 จำลองเพิ่มต้นไม้</button>
+              <button type="button" class="mini-btn" data-cmp-comm="${escHtml(c.id)}">⚖️ เปรียบเทียบ</button>
             </div>
           </div>`
                 )
@@ -516,6 +548,16 @@ export class CommunityStatsController {
 
         this.renderRowsAndCharts();
         this.renderSimulationDashboard();
+        this.renderCompareDashboard();
+    }
+
+    private buildRankedOptionsHtml(selectedVal: string | null): string {
+        return this.items
+            .map(
+                (x) =>
+                    `<option value="${escHtml(x.id)}" ${x.id === selectedVal ? "selected" : ""}>#${x.rank} ${escHtml(x.name)} (${x.score}/100 · เขต${escHtml(x.district)})</option>`
+            )
+            .join("");
     }
 
     private renderSimulationDashboard() {
@@ -526,24 +568,24 @@ export class CommunityStatsController {
         if (!target) return;
 
         const sim = simulateTreeAddition(target, this.selectedTrees);
-        const choices = [10, 20, 30, 40, 50];
 
         simPanelEl.innerHTML = `
       <div class="card" style="margin-bottom:12px;">
         <h3>
           <span>🧪 Dashboard เปรียบเทียบ: ปัจจุบัน vs ค่าสมมติการเพิ่มต้นไม้ (${escHtml(target.name)})</span>
-          <button type="button" class="mini-btn" data-jump-comm="${escHtml(target.id)}">🗺️ เปิดตำแหน่งบนแผนที่</button>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button type="button" class="mini-btn" data-cmp-comm="${escHtml(target.id)}">⚖️ เปรียบเทียบกับชุมชนอื่น</button>
+            <button type="button" class="mini-btn" data-jump-comm="${escHtml(target.id)}">🗺️ เปิดตำแหน่งบนแผนที่</button>
+          </div>
         </h3>
         <p class="note">
           <b>หลักการจำลอง:</b> คำนวณจากตัวแปรจริงของ <b>${escHtml(target.name)}</b> (<code>lst_mean_300</code> = ${fmtNum(target.lst300, 2)} °C, <code>lst_p90_300</code> = ${fmtNum(target.lstP90_300, 2)} °C, <code>builtup_pct_300</code> = ${fmtNum(target.builtup300, 1)}%, <code>green_ratio_300</code> = ${target.greenRatio300 != null ? fmtNum(target.greenRatio300 * 100, 1) + "%" : "—"}) โดยหักพื้นที่อาคารและสีเขียวเดิมออกเพื่อหาพื้นที่เปิดโล่งที่ปลูกแทรกได้จริง (<b>${sim.availableOpenSqm.toLocaleString()} ตร.ม.</b>)
         </p>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin:10px 0;">
-          ${choices
-                .map(
-                    (n) =>
-                        `<button type="button" class="mini-btn ${n === this.selectedTrees ? "active" : ""}" data-dash-trees="${n}">ปลูกสมมติ ${n} ต้น</button>`
-                )
-                .join("")}
+          ${TREE_CHOICES.map(
+            (n) =>
+                `<button type="button" class="mini-btn ${n === this.selectedTrees ? "active" : ""}" data-dash-trees="${n}">สมมติ +${n} ต้น</button>`
+        ).join("")}
         </div>
         ${renderSimulationSummary(target, sim)}
       </div>
@@ -551,7 +593,7 @@ export class CommunityStatsController {
 
         simPanelEl.querySelectorAll<HTMLButtonElement>("[data-dash-trees]").forEach((btn) => {
             btn.onclick = () => {
-                this.selectedTrees = Number(btn.dataset.dashTrees || 30);
+                this.selectedTrees = Number(btn.dataset.dashTrees || 50);
                 this.renderSimulationDashboard();
             };
         });
@@ -562,6 +604,182 @@ export class CommunityStatsController {
                 if (id && this.onJumpToMap) this.onJumpToMap(id);
             };
         });
+
+        simPanelEl.querySelectorAll<HTMLButtonElement>("[data-cmp-comm]").forEach((btn) => {
+            btn.onclick = () => {
+                const id = btn.dataset.cmpComm;
+                if (id) this.openCompareWith(id);
+            };
+        });
+    }
+
+    private renderCompareDashboard() {
+        const cmpPanelEl = document.getElementById("cs341-compare-dashboard");
+        if (!cmpPanelEl || this.items.length < 2) return;
+
+        const a = this.items.find((x) => x.id === this.selectedId) || this.items[0];
+        const b =
+            this.items.find((x) => x.id === this.compareId && x.id !== a.id) ||
+            this.items.find((x) => x.id !== a.id) ||
+            this.items[1];
+        this.compareId = b.id;
+
+        const simA = simulateTreeAddition(a, this.selectedTrees);
+        const simB = simulateTreeAddition(b, this.selectedTrees);
+
+        const aGreen = a.greenRatio300 != null ? a.greenRatio300 * 100 : null;
+        const bGreen = b.greenRatio300 != null ? b.greenRatio300 * 100 : null;
+
+        const diffStr = (va: number | null, vb: number | null, dec = 2, unit = "") => {
+            if (va == null || vb == null) return "—";
+            const d = va - vb;
+            const sign = d > 0 ? "+" : "";
+            return `${sign}${d.toFixed(dec)}${unit}`;
+        };
+
+        cmpPanelEl.innerHTML = `
+      <div class="card" style="margin-bottom:12px;">
+        <h3>⚖️ Dashboard เปรียบเทียบ 2 ชุมชน (เรียงรายการจากเปราะบางสุด #1 → น้อยสุด #${this.items.length})</h3>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin:8px 0 12px;">
+          <label class="note"><b>ชุมชนที่ 1:</b>
+            <select id="cmp-sel-a" style="margin-left:4px; padding:4px 8px; border-radius:6px; border:1px solid #cbd5e1;">
+              ${this.buildRankedOptionsHtml(a.id)}
+            </select>
+          </label>
+          <label class="note"><b>เทียบกับชุมชนที่ 2:</b>
+            <select id="cmp-sel-b" style="margin-left:4px; padding:4px 8px; border-radius:6px; border:1px solid #cbd5e1;">
+              ${this.buildRankedOptionsHtml(b.id)}
+            </select>
+          </label>
+          <button type="button" class="mini-btn" data-jump-comm="${escHtml(a.id)}">🗺️ ไปที่ #${a.rank} ${escHtml(a.name)}</button>
+          <button type="button" class="mini-btn" data-jump-comm="${escHtml(b.id)}">🗺️ ไปที่ #${b.rank} ${escHtml(b.name)}</button>
+        </div>
+
+        <div class="grid2" style="margin-bottom:12px;">
+          <div class="card" style="padding:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <b>#${a.rank} ${escHtml(a.name)}</b>
+              <span class="v-pill ${a.tier === "high" ? "danger" : a.tier === "moderate" ? "warn" : "cool"}">${a.score}/100</span>
+            </div>
+            <p class="note" style="margin:4px 0 8px;">เขต${escHtml(a.district)} · สถานะ: ${escHtml(a.rawRiskLevel || "—")} · พื้นที่ว่างปลูกได้ ${simA.availableOpenSqm.toLocaleString()} ตร.ม.</p>
+            <p class="note">จำลอง +${this.selectedTrees} ต้น (ค่าสมมติ): สีเขียว <b>${simA.simulatedGreenPct.toFixed(2)}%</b> · คาด LST ลด <b>-${simA.lstDropLow} ถึง -${simA.lstDropHigh} °C</b></p>
+          </div>
+          <div class="card" style="padding:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <b>#${b.rank} ${escHtml(b.name)}</b>
+              <span class="v-pill ${b.tier === "high" ? "danger" : b.tier === "moderate" ? "warn" : "cool"}">${b.score}/100</span>
+            </div>
+            <p class="note" style="margin:4px 0 8px;">เขต${escHtml(b.district)} · สถานะ: ${escHtml(b.rawRiskLevel || "—")} · พื้นที่ว่างปลูกได้ ${simB.availableOpenSqm.toLocaleString()} ตร.ม.</p>
+            <p class="note">จำลอง +${this.selectedTrees} ต้น (ค่าสมมติ): สีเขียว <b>${simB.simulatedGreenPct.toFixed(2)}%</b> · คาด LST ลด <b>-${simB.lstDropLow} ถึง -${simB.lstDropHigh} °C</b></p>
+          </div>
+        </div>
+
+        <div class="table-scroll" style="margin-bottom:12px;">
+          <table class="res-table">
+            <thead>
+              <tr>
+                <th>ตัวชี้วัด</th>
+                <th>#${a.rank} ${escHtml(a.name)}</th>
+                <th>#${b.rank} ${escHtml(b.name)}</th>
+                <th>ส่วนต่าง (A − B)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>คะแนนความเปราะบาง (0–100)</td>
+                <td><b>${a.score}</b></td>
+                <td><b>${b.score}</b></td>
+                <td><b>${diffStr(a.score, b.score, 0, " คะแนน")}</b></td>
+              </tr>
+              <tr>
+                <td>อุณหภูมิพื้นผิวเฉลี่ย LST (300 ม.)</td>
+                <td>${fmtNum(a.lst300, 2)} °C</td>
+                <td>${fmtNum(b.lst300, 2)} °C</td>
+                <td>${diffStr(a.lst300, b.lst300, 2, " °C")}</td>
+              </tr>
+              <tr>
+                <td>อุณหภูมิพีค p90 (300 ม.)</td>
+                <td>${fmtNum(a.lstP90_300, 2)} °C</td>
+                <td>${fmtNum(b.lstP90_300, 2)} °C</td>
+                <td>${diffStr(a.lstP90_300, b.lstP90_300, 2, " °C")}</td>
+              </tr>
+              <tr>
+                <td>ความหนาแน่นอาคาร (300 ม.)</td>
+                <td>${fmtNum(a.builtup300, 1)} %</td>
+                <td>${fmtNum(b.builtup300, 1)} %</td>
+                <td>${diffStr(a.builtup300, b.builtup300, 1, "%")}</td>
+              </tr>
+              <tr>
+                <td>สัดส่วนพื้นที่สีเขียว (300 ม.)</td>
+                <td>${aGreen != null ? aGreen.toFixed(1) + "%" : "—"}</td>
+                <td>${bGreen != null ? bGreen.toFixed(1) + "%" : "—"}</td>
+                <td>${diffStr(aGreen, bGreen, 1, "%")}</td>
+              </tr>
+              <tr>
+                <td>ผลจำลอง +${this.selectedTrees} ต้น (คาด LST ลดกลาง)</td>
+                <td>-${simA.lstDropMid} °C (สีเขียว ${simA.simulatedGreenPct.toFixed(2)}%)</td>
+                <td>-${simB.lstDropMid} °C (สีเขียว ${simB.simulatedGreenPct.toFixed(2)}%)</td>
+                <td>${diffStr(-simA.lstDropMid, -simB.lstDropMid, 2, " °C")}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="chart" id="cs341-c-compare"></div>
+        <p class="note" style="margin-top:6px;">⚠️ หมายเหตุ: คะแนนความเปราะบางและผลลด LST เป็นการประเมินเชิงดัชนีและค่าสมมติจากข้อมูลชั้นพื้นที่ ยังไม่ได้ลงสำรวจหน้างานจริง</p>
+      </div>
+    `;
+
+        const selA = document.getElementById("cmp-sel-a") as HTMLSelectElement | null;
+        const selB = document.getElementById("cmp-sel-b") as HTMLSelectElement | null;
+        if (selA) {
+            selA.onchange = () => {
+                this.selectedId = selA.value;
+                this.renderSimulationDashboard();
+                this.renderCompareDashboard();
+            };
+        }
+        if (selB) {
+            selB.onchange = () => {
+                this.compareId = selB.value;
+                this.renderCompareDashboard();
+            };
+        }
+
+        cmpPanelEl.querySelectorAll<HTMLButtonElement>("[data-jump-comm]").forEach((btn) => {
+            btn.onclick = () => {
+                const id = btn.dataset.jumpComm;
+                if (id && this.onJumpToMap) this.onJumpToMap(id);
+            };
+        });
+
+        const cmpChartEl = document.getElementById("cs341-c-compare");
+        if (cmpChartEl) {
+            if (!this.compareChart) this.compareChart = echarts.init(cmpChartEl);
+            else this.compareChart.dispose(), (this.compareChart = echarts.init(cmpChartEl));
+
+            this.compareChart.setOption({
+                tooltip: { trigger: "axis" },
+                legend: { top: 0, textStyle: { fontSize: 11 } },
+                grid: { left: 42, right: 16, top: 30, bottom: 26 },
+                xAxis: { type: "category", data: ["คะแนนเปราะบาง", "LST 300ม. (°C)", "อาคาร (%)", "พื้นที่สีเขียว (%)"] },
+                yAxis: { type: "value" },
+                series: [
+                    {
+                        name: `#${a.rank} ${a.name}`,
+                        type: "bar",
+                        data: [a.score, Number(a.lst300 ?? 0), Number(a.builtup300 ?? 0), Number(aGreen ?? 0)],
+                        itemStyle: { color: "#dc2626", borderRadius: [4, 4, 0, 0] },
+                    },
+                    {
+                        name: `#${b.rank} ${b.name}`,
+                        type: "bar",
+                        data: [b.score, Number(b.lst300 ?? 0), Number(b.builtup300 ?? 0), Number(bGreen ?? 0)],
+                        itemStyle: { color: "#0284c7", borderRadius: [4, 4, 0, 0] },
+                    },
+                ],
+            });
+        }
     }
 
     private renderRowsAndCharts() {
@@ -582,7 +800,7 @@ export class CommunityStatsController {
         tbody.innerHTML = filtered
             .map((c) => {
                 const pillClass = c.tier === "high" ? "danger" : c.tier === "moderate" ? "warn" : "cool";
-                const sim50 = simulateTreeAddition(c, 50);
+                const sim100 = simulateTreeAddition(c, 100);
                 return `<tr>
           <td><b>#${c.rank}</b> <span class="note">(${c.score}/100)</span></td>
           <td><b>${escHtml(c.name)}</b><br><span class="note">เขต${escHtml(c.district)} · ${escHtml(c.id)}</span></td>
@@ -594,8 +812,9 @@ export class CommunityStatsController {
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
               <button type="button" class="mini-btn" data-jump-comm="${escHtml(c.id)}">🗺️ ดูบนแผนที่</button>
               <button type="button" class="mini-btn" data-sim-comm="${escHtml(c.id)}">🧪 จำลองต้นไม้</button>
+              <button type="button" class="mini-btn" data-cmp-comm="${escHtml(c.id)}">⚖️ เปรียบเทียบ</button>
             </div>
-            <div class="note" style="margin-top:4px;">สมมติ +50 ต้น: สีเขียว +${sim50.deltaGreenPct.toFixed(2)}% · คาด LST -${sim50.lstDropLow} ถึง -${sim50.lstDropHigh} °C</div>
+            <div class="note" style="margin-top:4px;">ค่าสมมติ +100 ต้น: สีเขียว +${sim100.deltaGreenPct.toFixed(2)}% · คาด LST -${sim100.lstDropLow} ถึง -${sim100.lstDropHigh} °C</div>
           </td>
         </tr>`;
             })
@@ -616,6 +835,13 @@ export class CommunityStatsController {
                     this.renderSimulationDashboard();
                     document.getElementById("cs341-sim-dashboard")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
                 }
+            };
+        });
+
+        document.querySelectorAll<HTMLButtonElement>("[data-cmp-comm]").forEach((btn) => {
+            btn.onclick = () => {
+                const id = btn.dataset.cmpComm;
+                if (id) this.openCompareWith(id);
             };
         });
 
@@ -670,5 +896,6 @@ export class CommunityStatsController {
     resize() {
         this.barChart?.resize();
         this.scatterChart?.resize();
+        this.compareChart?.resize();
     }
 }
