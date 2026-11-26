@@ -24,7 +24,6 @@
     </div>
 
     <!-- เมนูหลัก 3 แท็บ -->
-    <!-- ใน <nav id="tabs"> แก้ชื่อปุ่มแท็บที่ 3 -->
     <nav id="tabs">
       <button data-tab="map" class="active">1. แผนที่ &amp; ชั้นข้อมูล</button>
       <button data-tab="stats">2. วิเคราะห์ปัจจัยความร้อน</button>
@@ -172,7 +171,7 @@
       </div>
     </section>
 
-    <!-- ② วิเคราะห์ปัจจัยความร้อน (รวมหน้าคำนวณ & เทียบงานวิจัยไว้ด้านใน) -->
+    <!-- ② วิเคราะห์ปัจจัยความร้อน (รวมหน้าคำนวณ & เทียบงานวิจัย และหน้าจัดลำดับชุมชน CS341) -->
     <section id="tab-stats" class="tab">
       <div class="stats-toolbar">
         <div id="headline" class="headline">กำลังวิเคราะห์ความร้อนในชุมชน…</div>
@@ -352,6 +351,74 @@
           </div>
         </div>
       </div>
+
+      <!-- มุมมองย่อย 2.3: วิเคราะห์ความเปราะบางและจัดลำดับความช่วยเหลือชุมชน (แสดงเฉพาะโหมด CS341) -->
+      <div id="cs341-stats-view" class="hidden">
+        <div class="res-wrap">
+          <div class="res-hero" style="background: linear-gradient(135deg, #b91c1c, #d97706); margin-bottom: 12px;">
+            <div>
+              <h2>ระบบจัดลำดับความสำคัญการช่วยเหลือชุมชนเปราะบาง (CS341 Priority Decision)</h2>
+              <p>วิเคราะห์เปรียบเทียบ <b>ความร้อนพื้นผิว (LST)</b> + <b>ความหนาแน่นอาคาร</b> +
+                <b>สัดส่วนพื้นที่สีเขียว</b> เพื่อระบุว่าชุมชนใดต้องได้รับการแทรกแซงเชิงออกแบบและผังเมืองก่อน–หลัง</p>
+            </div>
+          </div>
+
+          <div id="cs341-kpis" class="cards"></div>
+
+          <h3 style="margin: 14px 0 8px; font-size: 14.5px;">🚨 3 ชุมชนเร่งด่วนสูงสุดที่ควรเข้าช่วยเหลือก่อน (Top
+            Priority Intervention)</h3>
+          <div id="cs341-top-spotlight" class="takeaway-grid"></div>
+
+          <div class="grid2" style="margin-bottom: 12px;">
+            <div class="card">
+              <h3>1. 10 อันดับชุมชนที่มีคะแนนความเปราะบางสูงสุด (Vulnerability Score)</h3>
+              <div class="chart" id="cs341-c-bar"></div>
+            </div>
+            <div class="card">
+              <h3>2. ความสัมพันธ์ความหนาแน่นอาคาร vs ความร้อน LST (ขนาดจุด = ความขาดแคลนพื้นที่สีเขียว)</h3>
+              <div class="chart" id="cs341-c-scatter"></div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <h3>
+              <span>3. ตารางจัดลำดับความช่วยเหลือและแผนแก้ไขเชิงผังเมืองรายชุมชน</span>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <select id="cs341-filter-district">
+                  <option value="all">ทุกเขตพื้นที่</option>
+                </select>
+                <select id="cs341-filter-tier">
+                  <option value="all">ทุกระดับความเปราะบาง</option>
+                  <option value="high">เฉพาะเสี่ยงสูง / วิกฤต</option>
+                  <option value="moderate">ระดับปานกลาง</option>
+                  <option value="low">ความเสี่ยงต่ำ</option>
+                </select>
+              </div>
+            </h3>
+            <div class="table-scroll">
+              <table class="res-table">
+                <thead>
+                  <tr>
+                    <th>อันดับ</th>
+                    <th>ชื่อชุมชน / เขต</th>
+                    <th>ระดับความเสี่ยง</th>
+                    <th>LST (300 ม.)</th>
+                    <th>อาคาร (%)</th>
+                    <th>พื้นที่สีเขียว</th>
+                    <th>แนวทางออกแบบและแก้ไขเร่งด่วน (เรียงลำดับก่อน → หลัง)</th>
+                  </tr>
+                </thead>
+                <tbody id="cs341-ranking-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>📖 คำอธิบายตัวชี้วัดและเกณฑ์การจัดลำดับความเปราะบาง (Indicator Glossary)</h3>
+            <div id="cs341-glossary-box" class="glossary-list" style="max-height: none; padding: 6px 0;"></div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ③ Realtime & ข้อมูลย้อนหลัง IoT (ซ่อนอัตโนมัติในโหมด CS341) -->
@@ -425,61 +492,62 @@
             <div class="chart" id="live-c-hum"></div>
           </div>
         </div>
+      </div>
 
-        <!-- มุมมองย่อย 3.2: ข้อมูลย้อนหลัง (คง ID เดิมทั้งหมดไว้ครบ) -->
-        <div id="iot-sub-hist" class="hidden">
-          <div class="iot-toolbar">
-            <div class="iot-filters">
-              <label>อุปกรณ์ตรวจวัด
-                <select id="iot-dev"></select>
-              </label>
-              <label>วันที่
-                <input type="date" id="iot-date" value="2026-11-21" />
-              </label>
-              <label>ช่วงเวลา
-                <select id="iot-window">
-                  <option value="all">ทั้งวัน (00:00–24:00)</option>
-                  <option value="morning">ช่วงเช้า (06:00–12:00)</option>
-                  <option value="afternoon">ช่วงบ่าย (12:00–18:00)</option>
-                  <option value="evening">ช่วงค่ำ (18:00–24:00)</option>
-                </select>
-              </label>
-              <label>ความละเอียด
-                <select id="iot-interval">
-                  <option value="1min">รายนาที (1 min)</option>
-                  <option value="1s">รายวินาที (1 sec · สูงสุด 6 ชม.)</option>
-                </select>
-              </label>
-              <label class="row"><input type="checkbox" id="iot-dba" /> ซ้อนเส้น dBA</label>
-            </div>
-            <button id="iot-export" class="export-btn">ดาวน์โหลด CSV</button>
+      <!-- มุมมองย่อย 3.2: ข้อมูลย้อนหลัง -->
+      <div id="iot-sub-hist" class="hidden">
+        <div class="iot-toolbar">
+          <div class="iot-filters">
+            <label>อุปกรณ์ตรวจวัด
+              <select id="iot-dev"></select>
+            </label>
+            <label>วันที่
+              <input type="date" id="iot-date" value="2026-11-21" />
+            </label>
+            <label>ช่วงเวลา
+              <select id="iot-window">
+                <option value="all">ทั้งวัน (00:00–24:00)</option>
+                <option value="morning">ช่วงเช้า (06:00–12:00)</option>
+                <option value="afternoon">ช่วงบ่าย (12:00–18:00)</option>
+                <option value="evening">ช่วงค่ำ (18:00–24:00)</option>
+              </select>
+            </label>
+            <label>ความละเอียด
+              <select id="iot-interval">
+                <option value="1min">รายนาที (1 min)</option>
+                <option value="1s">รายวินาที (1 sec · สูงสุด 6 ชม.)</option>
+              </select>
+            </label>
+            <label class="row"><input type="checkbox" id="iot-dba" /> ซ้อนเส้น dBA</label>
           </div>
+          <button id="iot-export" class="export-btn">ดาวน์โหลด CSV</button>
+        </div>
 
-          <div id="iot-kpis" class="cards"></div>
+        <div id="iot-kpis" class="cards"></div>
 
-          <div class="grid-iot">
-            <div class="card span2">
-              <h3>ระดับเสียง dB(SPL) ย้อนหลัง <small>(เส้นเฉลี่ย และแถบช่วงต่ำสุด–สูงสุด)</small></h3>
-              <div class="chart" id="c-spl"></div>
-            </div>
-            <div class="card">
-              <h3>อุณหภูมิอากาศจริง (°C)</h3>
-              <div class="chart" id="c-temp"></div>
-            </div>
-            <div class="card">
-              <h3>ความชื้นสัมพัทธ์ (%)</h3>
-              <div class="chart sm" id="c-hum"></div>
-            </div>
-            <div class="card">
-              <h3>ความเข้มแสง (lux)</h3>
-              <div class="chart sm" id="c-lux"></div>
-            </div>
-            <div class="card">
-              <h3>ความสมบูรณ์ของข้อมูลรายชั่วโมง (%)</h3>
-              <div class="chart sm" id="c-quality"></div>
-            </div>
+        <div class="grid-iot">
+          <div class="card span2">
+            <h3>ระดับเสียง dB(SPL) ย้อนหลัง <small>(เส้นเฉลี่ย และแถบช่วงต่ำสุด–สูงสุด)</small></h3>
+            <div class="chart" id="c-spl"></div>
+          </div>
+          <div class="card">
+            <h3>อุณหภูมิอากาศจริง (°C)</h3>
+            <div class="chart" id="c-temp"></div>
+          </div>
+          <div class="card">
+            <h3>ความชื้นสัมพัทธ์ (%)</h3>
+            <div class="chart sm" id="c-hum"></div>
+          </div>
+          <div class="card">
+            <h3>ความเข้มแสง (lux)</h3>
+            <div class="chart sm" id="c-lux"></div>
+          </div>
+          <div class="card">
+            <h3>ความสมบูรณ์ของข้อมูลรายชั่วโมง (%)</h3>
+            <div class="chart sm" id="c-quality"></div>
           </div>
         </div>
+      </div>
     </section>
   </main>
 

@@ -2,6 +2,11 @@ import maplibregl from "maplibre-gl";
 import * as echarts from "echarts";
 import { api, toMinuteObjects } from "./api";
 import { AOI, cellOf, getMockBuildingsGeoJson, LEGENDS } from "./mock-api";
+import {
+  buildCommunityPriorityHtml,
+  evaluateAllCommunities,
+  type CommunityPriorityResult,
+} from "./community-priority";
 import type {
   AnalyticsHotspot,
   BuildingsGeoJson,
@@ -250,10 +255,10 @@ export class MapController {
   grid: GridFeatureCollection | null = null;
   devices: DeviceInfo[] = [];
   stationMarkers: maplibregl.Marker[] = [];
+  communityRankings: CommunityPriorityResult[] = [];
   private liveMarker: maplibregl.Marker | null = null;
   private liveCoords: [number, number] | null = null;
   private liveRefreshTimer: number | null = null;
-  // ข้อมูลล่าสุดของหมุดปัจจุบัน (ใช้กับ popup เพื่อให้ค่าอัปเดตตามรอบรีเฟรช)
   private liveInfo: { devId: string; ts: string; row: Record<string, unknown> } | null = null;
   projectMode: ProjectMode = "project2";
   fitted = false;
@@ -437,14 +442,12 @@ export class MapController {
       ["track-pts", "track-line"].filter((l) => this.map.getLayer(l)).forEach((l) => this.map.setLayoutProperty(l, "visibility", show ? "visible" : "none"));
     };
 
-    // ปุ่มโฟกัสไปที่พิกัดปัจจุบันของอุปกรณ์
     document.getElementById("iot-focus-now")?.addEventListener("click", () => {
       if (this.liveCoords) {
         this.map.easeTo({ center: this.liveCoords, zoom: Math.max(this.map.getZoom(), 16.5), duration: 500 });
       }
     });
 
-    // คลิกอาคาร 3D -> เปิด Dashboard ด้านขวา
     this.map.on("click", "bldg-3d", (e) => {
       const feat = e.features?.[0];
       const props = feat?.properties || {};
@@ -454,7 +457,6 @@ export class MapController {
     this.map.on("mouseenter", "bldg-3d", () => (this.map.getCanvas().style.cursor = "pointer"));
     this.map.on("mouseleave", "bldg-3d", () => (this.map.getCanvas().style.cursor = ""));
 
-    // คลิกชุมชนเปราะบาง (โหมด CS341) -> เปิด Dashboard ด้านขวา
     this.map.on("click", "comm-fill", (e) => {
       if (this.projectMode !== "cs341") return;
       const bldgHits = this.map.queryRenderedFeatures(e.point, {
@@ -468,7 +470,6 @@ export class MapController {
     this.map.on("mouseenter", "comm-fill", () => (this.map.getCanvas().style.cursor = "pointer"));
     this.map.on("mouseleave", "comm-fill", () => (this.map.getCanvas().style.cursor = ""));
 
-    // คลิกกริด 90x90 m -> เปิด Dashboard ด้านขวา
     this.map.on("click", "grid-hit", (e) => {
       const bldgHits = this.map.queryRenderedFeatures(e.point, { layers: this.map.getLayer("bldg-3d") ? ["bldg-3d"] : [] });
       if (bldgHits.length > 0) return;
@@ -509,8 +510,11 @@ export class MapController {
       if (note) note.textContent = "ยังไม่มีข้อมูลชุมชนในระบบ API";
       return;
     }
+
+    this.communityRankings = evaluateAllCommunities(data.features);
+
     if (note) {
-      note.innerHTML = `พบ <b>${data.features.length} ชุมชน</b> (เขตดอนเมือง–หลักสี่) · คลิกเพื่อเปิด Dashboard`;
+      note.innerHTML = `พบ <b>${data.features.length} ชุมชน</b> (เขตดอนเมือง–หลักสี่) · คลิกเพื่อดูลำดับความเร่งด่วน`;
     }
 
     const existing = this.map.getSource("communities") as maplibregl.GeoJSONSource | undefined;
@@ -547,16 +551,17 @@ export class MapController {
   }
 
   private openCommunityDashboard(props: Record<string, unknown>) {
-    const level = String(props.risk_level || "");
-    const riskMap: Record<string, { label: string; theme: "red" | "amber" | "emerald" }> = {
-      high: { label: "ความเสี่ยงสูง (เขียวน้อย · อาคารหนาแน่น)", theme: "red" },
-      medium: { label: "ความเสี่ยงปานกลาง", theme: "amber" },
-      low: { label: "ความเสี่ยงต่ำ (พื้นที่สีเขียวสูง)", theme: "emerald" },
-    };
-    const info = riskMap[level] || { label: level || "ไม่ระบุระดับ", theme: "emerald" as const };
+    const cid = String(props.community_id || "");
+    const evaluated =
+      this.communityRankings.find((c) => c.id === cid) ||
+      evaluateAllCommunities([
+        { type: "Feature", geometry: null as unknown as GeoJSON.Geometry, properties: props },
+      ])[0];
+
     const pct = (v: unknown) => (v != null && v !== "" ? `${fmt(Number(v) * 100, 1)} %` : "—");
 
     const html = `
+      ${buildCommunityPriorityHtml(evaluated)}
       ${buildVerdictHtml(props.lst_mean_300, null, false)}
 
       <div class="d-kpis">
@@ -604,10 +609,10 @@ export class MapController {
     `;
 
     this.openDrawer({
-      theme: info.theme,
-      badge: `ชุมชนเปราะบาง · ${String(props.community_id || "CS341")}`,
+      theme: evaluated.theme,
+      badge: `อันดับ #${evaluated.rank}/${evaluated.total} · ${String(props.community_id || "CS341")}`,
       title: String(props.name || props.community_id || "ชุมชน"),
-      sub: `เขต${String(props.district || "—")} · ${info.label}`,
+      sub: `เขต${String(props.district || "—")} · ${evaluated.tierLabel}`,
       html,
       onReady: () => {
         const el = document.getElementById("drawer-chart");
@@ -1092,7 +1097,6 @@ export class MapController {
       const vis = this.projectMode === "project2" ? "visible" : "none";
       this.map.addSource("track-line", { type: "geojson", data: line as unknown as GeoJSON.Feature });
       this.map.addSource("track", { type: "geojson", data: fc as unknown as GeoJSON.FeatureCollection });
-      // เส้นทางย้อนหลังปรับให้ดูเบาลง เพื่อให้หมุดพิกัดปัจจุบันเด่นขึ้น
       this.map.addLayer({
         id: "track-line",
         type: "line",
@@ -1130,7 +1134,6 @@ export class MapController {
     }
     this.styleTrack();
 
-    // อัปเดตหมุดพิกัดปัจจุบัน (แยกจากเส้นทางย้อนหลัง)
     await this.refreshCurrentPosition(dev);
   }
 
@@ -1163,7 +1166,6 @@ export class MapController {
           wrapper.innerHTML = `<div class="iot-live-badge" id="iot-live-pin-label">${esc(devId)} · ปัจจุบัน</div><div class="iot-live-dot"></div>`;
           wrapper.onclick = (ev) => {
             ev.stopPropagation();
-            // อ่านค่าล่าสุดจาก liveInfo/liveCoords เพื่อไม่ให้ popup แสดงค่าเก่าหลังรีเฟรช
             const cur = this.liveInfo;
             const pos = this.liveCoords;
             if (!cur || !pos) return;
