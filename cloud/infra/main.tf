@@ -64,7 +64,7 @@ module "pipeline" {
   statemachine_file = "${path.root}/../pipeline/statemachine/pipeline.asl.json"
   alert_email       = var.alert_email
   schedule_enabled  = var.pipeline_schedule_enabled
-  pandas_layer_arn  = var.pandas_layer_arn
+  pandas_layer_arn  = local.pandas_layer_arn
 }
 
 # Glue Data Catalog + Athena (spec 40 §2, #17). Partition projection -> no crawler.
@@ -129,7 +129,7 @@ module "satellite_pipeline" {
   contracts_dir     = "${path.root}/../pipeline/contracts"
   statemachine_file = "${path.root}/../satellite/pipeline/statemachine/satellite-pipeline.asl.json"
   alert_topic_arn   = module.pipeline.alert_topic_arn
-  pandas_layer_arn  = var.pandas_layer_arn
+  pandas_layer_arn  = local.pandas_layer_arn
   trigger_enabled   = var.satellite_pipeline_trigger_enabled
 }
 
@@ -167,7 +167,7 @@ module "analytics" {
   alert_topic_arn   = module.pipeline.alert_topic_arn
   athena_database   = module.catalog.database_name
   athena_workgroup  = module.catalog.workgroup_name
-  pandas_layer_arn  = var.pandas_layer_arn
+  pandas_layer_arn  = local.pandas_layer_arn
   trigger_enabled   = var.analytics_trigger_enabled
   weekly_schedule   = var.analytics_weekly_schedule
 }
@@ -198,4 +198,11 @@ resource "terraform_data" "sync_web_config" {
       fi
     EOT
   }
+}
+
+# Public AWS SDK for pandas layer (pyarrow) of the deploy region (plan R6).
+locals {
+  pandas_layer_arn = var.pandas_layer_arn != "" ? var.pandas_layer_arn : (
+    "arn:aws:lambda:${var.region}:336392948345:layer:AWSSDKPandas-Python312:${var.pandas_layer_version}"
+  )
 }

@@ -4,7 +4,7 @@
 // อ่านจากบนลงล่าง (3 ส่วน):
 //   1) ต้องแก้      ค่าที่ไม่มี default ต้องใส่ก่อนถึงจะ apply ได้
 //   2) เปิดอยู่แล้ว  ส่วนของ IoT ใช้ค่าตามนี้ได้เลย แก้เมื่อจำเป็น
-//   3) ปิดอยู่       ส่วนของดาวเทียม เปิดทีละขั้นตามลำดับ A -> B -> C
+//   3) ดาวเทียม     เปิดครบทุกขั้นเป็นค่าเริ่มต้น (A -> B -> C -> D) ปิดได้ทีละขั้น
 // ============================================================================
 
 
@@ -23,9 +23,13 @@ device_token_hashes = {
 // อีเมลรับแจ้งเตือนจาก pipeline (ต้องกดยืนยันในอีเมลที่ SNS ส่งมาครั้งแรก)
 alert_email = "you@example.com"
 
-// layer สำเร็จรูปของ AWS (มี pyarrow) ใส่เลขเวอร์ชันล่าสุดแทน <version>
-// ดูที่ https://aws-sdk-pandas.readthedocs.io/en/stable/install.html หัวข้อ AWS Lambda Layer
-pandas_layer_arn = "arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:<version>"
+// region ของทั้งระบบ (default ap-southeast-1)
+// region = "ap-southeast-1"
+
+// layer สำเร็จรูปของ AWS (มี pyarrow) Terraform ประกอบ ARN จาก region + เวอร์ชันให้เอง
+// เช็กว่าเวอร์ชันมีจริงใน region: aws lambda get-layer-version-by-arn --arn arn:aws:lambda:ap-southeast-1:336392948345:layer:AWSSDKPandas-Python312:<version>
+// ดูเวอร์ชันล่าสุดที่ https://aws-sdk-pandas.readthedocs.io/en/stable/install.html หัวข้อ AWS Lambda Layer
+// pandas_layer_version = 31
 
 
 // ── 2) IoT: เปิดอยู่แล้ว ──────────────────────────────────────────────────────
@@ -39,12 +43,12 @@ hub_enabled   = true
 pipeline_schedule_enabled = true
 
 
-// ── 3) ดาวเทียม: ปิดอยู่ เปิดทีละขั้น (เปลี่ยนเป็น true แล้ว apply ทีละอัน) ────────
+// ── 3) ดาวเทียม: เปิดครบเป็นค่าเริ่มต้น (ปิดขั้นไหน ให้ปิดขั้นที่อยู่ถัดลงไปด้วย) ─────
 
 // A. ดึง Landsat จาก GEE ลง S3 raw/satellite/ ทุกวัน
 //    เปิดแล้ว apply จะรัน cloud/satellite/layer/build_layer.py สร้าง gee-layer.zip ให้เอง
 //    (เครื่องที่รัน terraform ต้องมี python + pip และออกเน็ตได้)
-satellite_enabled = false
+satellite_enabled = true
 //    WIF: แต่ละ AWS account ต้องมี provider ของตัวเองใน identity pool ฝั่ง Google
 //    ใส่ provider_id ของ account นี้ (default ใน variables.tf เป็นของอีก account)
 // gee_wif = {
@@ -56,14 +60,14 @@ satellite_enabled = false
 
 // B. ตรวจ batch ด้วย data contract -> trusted/ + PNG layer (ต้องเปิด A ก่อน)
 //    หมายเหตุ: เปิดแล้ว bucket จะส่ง event ให้ EventBridge (ทับ notification อื่นของ bucket)
-satellite_pipeline_enabled = false
+satellite_pipeline_enabled = true
 
 // C. Athena MERGE -> ตาราง Iceberg iot_walking.cell_period (ต้องเปิด B ก่อน และ apply catalog ให้เสร็จก่อน)
-curated_merge_enabled = false
+curated_merge_enabled = true
 
 // D. สถิติ S1-S8 (#33) อ่าน cell_period -> curated/analytics/ (ต้องเปิด C ก่อน)
 //    รันเองหลัง merge เสร็จ + รายสัปดาห์ (อาทิตย์ 11:00 น.) คำนวณใหม่ทุก period
-analytics_enabled = false
+analytics_enabled = true
 
 
 // ตัวเลือกอื่นทั้งหมด (CORS, ตั้งเวลา, ค่า GEE, threshold ฯลฯ) มี default ใน variables.tf ไม่ต้องใส่

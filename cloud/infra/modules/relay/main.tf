@@ -55,7 +55,7 @@ variable "allowed_cidrs" {
 }
 
 variable "ssh_cidrs" {
-  description = "Port 22 for reading logs; empty = closed. EC2 Instance Connect (console) in us-east-1 = 18.206.107.24/29"
+  description = "Port 22 for reading logs; empty = closed. EC2 Instance Connect (console): EC2_INSTANCE_CONNECT range of the region in ip-ranges.json"
   type        = list(string)
   default     = []
 }

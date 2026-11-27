@@ -1,6 +1,7 @@
 variable "region" {
-  type    = string
-  default = "us-east-1"
+  description = "AWS region of the whole stack (own account, plan R6)"
+  type        = string
+  default     = "ap-southeast-1"
 }
 
 variable "name_prefix" {
@@ -21,7 +22,7 @@ variable "device_token_hashes" {
 }
 
 variable "relay_enabled" {
-  description = "EC2 HTTP -> HTTPS relay for the ESP32 (no RAM for TLS). Costs an always-on t3.micro while the lab runs."
+  description = "EC2 HTTP -> HTTPS relay for the ESP32 (no RAM for TLS). Costs an always-on t3.micro (+ Elastic IP) while deployed."
   type        = bool
   default     = true
 }
@@ -33,7 +34,7 @@ variable "hub_enabled" {
 }
 
 variable "relay_ssh_cidrs" {
-  description = "Open port 22 on the relay for logs, e.g. [\"18.206.107.24/29\"] for EC2 Instance Connect in us-east-1. Empty = closed."
+  description = "Open port 22 on the relay for logs (EC2 Instance Connect range of the region: ip-ranges.json service EC2_INSTANCE_CONNECT). Empty = closed."
   type        = list(string)
   default     = []
 }
@@ -50,9 +51,16 @@ variable "pipeline_schedule_enabled" {
   default     = true
 }
 
+variable "pandas_layer_version" {
+  description = "Version of the public AWSSDKPandas-Python312 layer in var.region (aws-sdk-pandas install docs, 'AWS Lambda Layer'). Check: aws lambda get-layer-version-by-arn --arn <arn>"
+  type        = number
+  default     = 31
+}
+
 variable "pandas_layer_arn" {
-  description = "AWS SDK for pandas Lambda layer for Python 3.12 in us-east-1 (see aws-sdk-pandas install docs, 'AWS Lambda Layer')."
+  description = "Full layer ARN override. Empty = built from var.region + pandas_layer_version."
   type        = string
+  default     = ""
 }
 
 variable "catalog_date_start" {
@@ -68,7 +76,7 @@ variable "athena_bytes_scanned_cutoff" {
 }
 
 variable "api_allowed_origins" {
-  description = "CORS origins allowed to call the API (#18). [\"*\"] until the web (#35) has a domain, then e.g. [\"http://<bucket>.s3-website-us-east-1.amazonaws.com\"]."
+  description = "CORS origins allowed to call the API (#18). [\"*\"] until the web (#35) has a domain, then the CloudFront URL, e.g. [\"https://<id>.cloudfront.net\"]."
   type        = list(string)
   default     = ["*"]
 }
@@ -76,7 +84,7 @@ variable "api_allowed_origins" {
 variable "satellite_enabled" {
   description = "Deploy the GEE layer + test Lambda (#25) + satellite_ingest with its daily schedule (#27). The layer zip is built on apply (see python_cmd / gee_layer_zip)."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "gee_layer_zip" {
@@ -140,7 +148,7 @@ variable "satellite_min_valid_ratio" {
 variable "satellite_pipeline_enabled" {
   description = "Deploy the satellite pipeline (#30-#31, spec 51) and turn on S3 -> EventBridge notifications for the bucket"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "satellite_pipeline_trigger_enabled" {
@@ -152,7 +160,7 @@ variable "satellite_pipeline_trigger_enabled" {
 variable "curated_merge_enabled" {
   description = "Deploy curated-merge (#32, spec 60 §2.1): Athena MERGE into Iceberg cell_period"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "curated_merge_trigger_enabled" {
@@ -170,7 +178,7 @@ variable "curated_merge_daily_schedule" {
 variable "analytics_enabled" {
   description = "Deploy heat analytics S1-S8 (#33, Spec 60 §3-4)"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "analytics_trigger_enabled" {

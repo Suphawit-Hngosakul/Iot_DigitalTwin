@@ -12,7 +12,7 @@ variable "eventbridge_enabled" {
 
 variable "region" {
   type    = string
-  default = "us-east-1"
+  default = "ap-southeast-1"
 }
 
 variable "cors_allowed_origins" {

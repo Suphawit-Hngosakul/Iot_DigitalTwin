@@ -32,7 +32,7 @@ variable "lookback_hours" {
 }
 
 variable "pandas_layer_arn" {
-  description = "AWS SDK for pandas layer (pyarrow) for transform/verify, e.g. arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:<version>"
+  description = "AWS SDK for pandas layer (pyarrow) for transform/verify, e.g. arn:aws:lambda:ap-southeast-1:336392948345:layer:AWSSDKPandas-Python312:<version>"
   type        = string
 }
 
