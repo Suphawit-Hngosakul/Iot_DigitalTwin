@@ -18,7 +18,7 @@ output "hub_device_url" {
 }
 
 output "hub_live_url" {
-  description = "For live.html / the web: <this>?device=all"
+  description = "Direct ws:// to the hub (live.html / debugging). The web uses web_hub_live_url (wss via CloudFront)."
   value       = var.relay_enabled ? module.relay[0].hub_live_url : null
 }
 
@@ -80,4 +80,23 @@ output "curated_merge_state_machine_arn" {
 output "analytics_state_machine_arn" {
   description = "Heat analytics (#33); start by hand with {\"periods\": [\"season_2025_03-05\"], \"mode\": \"force\"} or {}. null when analytics_enabled = false"
   value       = one(module.analytics[*].state_machine_arn)
+}
+
+output "web_url" {
+  description = "Open this in the browser (HTTPS via CloudFront)"
+  value       = module.web.web_url
+}
+
+output "web_hub_live_url" {
+  description = "wss URL written to config.json"
+  value       = module.web.hub_live_url
+}
+
+output "web_bucket" {
+  value = module.web.bucket_name
+}
+
+output "web_distribution_id" {
+  description = "aws cloudfront create-invalidation --distribution-id <this> --paths \"/index.html\""
+  value       = module.web.distribution_id
 }
