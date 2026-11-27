@@ -1169,11 +1169,11 @@ export class MapController {
         source: "track",
         layout: { visibility: vis },
         paint: {
-          "circle-radius": 3.5,
-          "circle-opacity": 0.55,
-          "circle-stroke-color": "#fff",
-          "circle-stroke-width": 1,
-          "circle-stroke-opacity": 0.6,
+          "circle-radius": 5.5,
+          "circle-opacity": 0.9,
+          "circle-stroke-color": "#0f172a",
+          "circle-stroke-width": 1.5,
+          "circle-stroke-opacity": 0.95,
         },
       });
       this.map.on("click", "track-pts", (e) => {
