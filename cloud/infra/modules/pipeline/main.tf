@@ -8,7 +8,18 @@ terraform {
 }
 
 variable "name_prefix" { type = string }
-variable "role_arn" { type = string }
+variable "role_arn" {
+  description = "Lambda execution role"
+  type        = string
+}
+variable "sfn_role_arn" {
+  description = "Role the state machine runs as (invoke Lambda + SNS publish)"
+  type        = string
+}
+variable "trigger_role_arn" {
+  description = "Role EventBridge / Scheduler assume to start the state machine"
+  type        = string
+}
 variable "bucket_name" { type = string }
 variable "functions_dir" { type = string }
 variable "common_dir" { type = string }
@@ -107,7 +118,7 @@ resource "aws_sns_topic_subscription" "email" {
 
 resource "aws_sfn_state_machine" "pipeline" {
   name     = "${var.name_prefix}-iot-pipeline"
-  role_arn = var.role_arn
+  role_arn = var.sfn_role_arn
   type     = "STANDARD"
   definition = templatefile(var.statemachine_file, {
     plan_batches_arn     = aws_lambda_function.fn["plan_batches"].arn
@@ -120,7 +131,7 @@ resource "aws_sfn_state_machine" "pipeline" {
   })
 }
 
-# Learner Lab: the Scheduler assumes LabRole to start the state machine.
+# The Scheduler assumes the trigger role to start the state machine.
 resource "aws_scheduler_schedule" "hourly" {
   name                         = "${var.name_prefix}-iot-pipeline-hourly"
   state                        = var.schedule_enabled ? "ENABLED" : "DISABLED"
@@ -133,7 +144,7 @@ resource "aws_scheduler_schedule" "hourly" {
 
   target {
     arn      = aws_sfn_state_machine.pipeline.arn
-    role_arn = var.role_arn
+    role_arn = var.trigger_role_arn
     # <aws.scheduler.scheduled-time> -> PlanBatches derives hour H from it.
     # Literal string, not jsonencode(): jsonencode escapes < > as < >
     # and the Scheduler only substitutes the unescaped placeholder.

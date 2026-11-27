@@ -1,5 +1,5 @@
 # GEE Lambdas (spec 50): connectivity test (#25) + satellite_ingest (#27).
-# Auth: Workload Identity Federation, the Lambda's LabRole credentials are
+# Auth: Workload Identity Federation, the Lambda's own role credentials are
 # exchanged for a Google token, so no service-account key is stored anywhere.
 terraform {
   required_providers {

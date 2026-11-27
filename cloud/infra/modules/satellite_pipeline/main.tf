@@ -9,7 +9,18 @@ terraform {
 }
 
 variable "name_prefix" { type = string }
-variable "role_arn" { type = string }
+variable "role_arn" {
+  description = "Lambda execution role"
+  type        = string
+}
+variable "sfn_role_arn" {
+  description = "Role the state machine runs as (invoke Lambda + SNS publish)"
+  type        = string
+}
+variable "trigger_role_arn" {
+  description = "Role EventBridge / Scheduler assume to start the state machine"
+  type        = string
+}
 variable "bucket_name" { type = string }
 variable "functions_dir" { type = string }
 variable "common_dir" { type = string }
@@ -104,7 +115,7 @@ resource "aws_lambda_function" "fn" {
 
 resource "aws_sfn_state_machine" "pipeline" {
   name     = "${var.name_prefix}-sat-pipeline"
-  role_arn = var.role_arn
+  role_arn = var.sfn_role_arn
   type     = "STANDARD"
   definition = templatefile(var.statemachine_file, {
     check_batch_arn      = aws_lambda_function.fn["check_batch"].arn
@@ -136,7 +147,7 @@ resource "aws_cloudwatch_event_rule" "complete" {
 resource "aws_cloudwatch_event_target" "pipeline" {
   rule     = aws_cloudwatch_event_rule.complete.name
   arn      = aws_sfn_state_machine.pipeline.arn
-  role_arn = var.role_arn # Learner Lab: LabRole starts the execution
+  role_arn = var.trigger_role_arn
 
   input_transformer {
     input_paths    = { key = "$.detail.object.key" }

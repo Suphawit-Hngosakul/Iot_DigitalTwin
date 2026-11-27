@@ -1,4 +1,4 @@
-# Root module (spec 00 §IaC). Learner Lab: us-east-1, every service uses LabRole.
+# Root module (spec 00 §IaC). Own AWS account: each service has its own IAM role (modules/iam).
 terraform {
   required_version = ">= 1.6"
   required_providers {
@@ -14,10 +14,6 @@ provider "aws" {
   }
 }
 
-# Learner Lab cannot create IAM roles -> use the existing LabRole.
-data "aws_iam_role" "lab" {
-  name = "LabRole"
-}
 
 module "storage" {
   source      = "./modules/storage"
@@ -32,7 +28,7 @@ module "storage" {
 module "ingest" {
   source              = "./modules/ingest"
   name_prefix         = var.name_prefix
-  role_arn            = data.aws_iam_role.lab.arn
+  role_arn            = module.iam.lambda_role_arns["ingest"]
   bucket_name         = module.storage.bucket_name
   device_token_hashes = var.device_token_hashes
   source_dir          = "${path.root}/../ingest"
@@ -57,7 +53,9 @@ module "relay" {
 module "pipeline" {
   source            = "./modules/pipeline"
   name_prefix       = var.name_prefix
-  role_arn          = data.aws_iam_role.lab.arn
+  role_arn          = module.iam.lambda_role_arns["pipeline"]
+  sfn_role_arn      = module.iam.sfn_role_arn
+  trigger_role_arn  = module.iam.trigger_role_arn
   bucket_name       = module.storage.bucket_name
   functions_dir     = "${path.root}/../pipeline/functions"
   common_dir        = "${path.root}/../pipeline/common"
@@ -76,11 +74,22 @@ module "catalog" {
   bytes_scanned_cutoff = var.athena_bytes_scanned_cutoff
 }
 
+# IAM roles per service (plan R1): replaces the Learner Lab LabRole.
+data "aws_caller_identity" "current" {}
+
+module "iam" {
+  source           = "./modules/iam"
+  name_prefix      = var.name_prefix
+  bucket_name      = module.storage.bucket_name
+  athena_database  = module.catalog.database_name
+  athena_workgroup = module.catalog.workgroup_name
+}
+
 # API for the web (spec 40 §3, #18). Reads Athena + publish markers, own HTTP API.
 module "api" {
   source           = "./modules/api"
   name_prefix      = var.name_prefix
-  role_arn         = data.aws_iam_role.lab.arn
+  role_arn         = module.iam.lambda_role_arns["api"]
   bucket_name      = module.storage.bucket_name
   source_dir       = "${path.root}/../api"
   common_dir       = "${path.root}/../pipeline/common"
@@ -97,7 +106,7 @@ module "satellite" {
   count        = var.satellite_enabled ? 1 : 0
   source       = "./modules/satellite"
   name_prefix  = var.name_prefix
-  role_arn     = data.aws_iam_role.lab.arn
+  role_arn     = module.iam.lambda_role_arns["satellite"]
   handler_file = "${path.root}/../satellite/test_lambda/handler.py"
   layer_zip    = var.gee_layer_zip != "" ? var.gee_layer_zip : "${path.root}/../satellite/layer/build/gee-layer.zip"
   # Build the zip on apply only when no prebuilt zip is given.
@@ -122,7 +131,9 @@ module "satellite_pipeline" {
   count             = var.satellite_pipeline_enabled ? 1 : 0
   source            = "./modules/satellite_pipeline"
   name_prefix       = var.name_prefix
-  role_arn          = data.aws_iam_role.lab.arn
+  role_arn          = module.iam.lambda_role_arns["satellite_pipeline"]
+  sfn_role_arn      = module.iam.sfn_role_arn
+  trigger_role_arn  = module.iam.trigger_role_arn
   bucket_name       = module.storage.bucket_name
   functions_dir     = "${path.root}/../satellite/pipeline/functions"
   common_dir        = "${path.root}/../pipeline/common"
@@ -141,7 +152,9 @@ module "curated_merge" {
   source            = "./modules/curated_merge"
   name_prefix       = var.name_prefix
   bucket_name       = module.storage.bucket_name
-  role_arn          = data.aws_iam_role.lab.arn
+  role_arn          = module.iam.lambda_role_arns["curated_merge"]
+  sfn_role_arn      = module.iam.sfn_role_arn
+  trigger_role_arn  = module.iam.trigger_role_arn
   functions_dir     = "${path.root}/../analytics/curated_merge/functions"
   common_dir        = "${path.root}/../pipeline/common"
   statemachine_file = "${path.root}/../analytics/curated_merge/statemachine/curated-merge.asl.json"
@@ -158,7 +171,9 @@ module "analytics" {
   count             = var.analytics_enabled ? 1 : 0
   source            = "./modules/analytics"
   name_prefix       = var.name_prefix
-  role_arn          = data.aws_iam_role.lab.arn
+  role_arn          = module.iam.lambda_role_arns["analytics"]
+  sfn_role_arn      = module.iam.sfn_role_arn
+  trigger_role_arn  = module.iam.trigger_role_arn
   bucket_name       = module.storage.bucket_name
   functions_dir     = "${path.root}/../analytics/functions"
   stats_dir         = "${path.root}/../analytics/stats"
