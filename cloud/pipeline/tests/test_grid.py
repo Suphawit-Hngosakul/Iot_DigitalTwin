@@ -51,7 +51,7 @@ def test_every_cell_center_maps_back():
 
 def test_latlon_roundtrip_and_aoi_inside_grid():
     pytest.importorskip("pyproj")
-    # Lak Si + Don Mueang communities (south-west and north-east extremes)
+    # points in Lak Si + Don Mueang (south-west and north-east extremes)
     for lat, lon in [(13.8594, 100.5475), (13.944, 100.613), (13.9493, 100.5711)]:
         cid = g.latlon_to_cell(lat, lon)
         assert cid is not None

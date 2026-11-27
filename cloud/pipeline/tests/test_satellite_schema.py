@@ -1,13 +1,9 @@
 from datetime import date
-from pathlib import Path
 
 import pytest
 
 from common import grid as g
 from common import satellite_schema as s
-
-FIXTURES = Path(__file__).with_name("fixtures")
-
 
 # ── periods ──────────────────────────────────────────────────────────────────
 
@@ -79,80 +75,6 @@ def test_arrow_schema():
         assert s.arrow_schema(t).names == [n for n, _ in s.TABLES[t]]
 
 
-# ── communities ──────────────────────────────────────────────────────────────
-
-def test_load_real_communities():
-    cs = s.load_communities(FIXTURES / "communities.csv")
-    assert len(cs) == 36
-    assert {c.district for c in cs} == {"หลักสี่", "ดอนเมือง"}
-
-
-def test_load_communities_rejects_duplicates(tmp_path):
-    p = tmp_path / "c.csv"
-    p.write_text(",".join(s.COMMUNITIES_COLUMNS) + "\n"
-                 "C0001,a,หลักสี่,13.9,100.5,x\nC0001,b,หลักสี่,13.9,100.5,x\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="duplicate"):
-        s.load_communities(p)
-
-
-def test_buffer_cells_for_every_community():
-    pytest.importorskip("pyproj")
-    for c in s.load_communities(FIXTURES / "communities.csv"):
-        for method, n_expected in (("buffer_300", 35), ("buffer_500", 97)):
-            rows = s.community_cells_buffer(c, method)
-            area = sum(r["weight"] for r in rows)
-            assert abs(area - n_expected) / n_expected < 0.03, (c.community_id, method)
-    with pytest.raises(ValueError):
-        s.community_cells_buffer(c, "polygon")
-
-
-# ── summary ──────────────────────────────────────────────────────────────────
-
-def test_weighted_helpers():
-    assert s.weighted_mean([(10, 1), (20, 3), (None, 5)]) == 17.5
-    assert s.weighted_mean([(None, 1)]) is None
-    assert s.weighted_quantile([(1, 1), (2, 1), (3, 1), (4, 1), (5, 6)], 0.9) == 5
-    assert s.weighted_quantile([(1, 9), (100, 1)], 0.9) == 1
-
-
-def test_summarize_community():
-    cells = [
-        {"community_id": "C0001", "method": "buffer_300", "cell_id": "c0001_r0001", "weight": 1.0},
-        {"community_id": "C0001", "method": "buffer_300", "cell_id": "c0002_r0001", "weight": 0.5},
-        {"community_id": "C0001", "method": "buffer_300", "cell_id": "c0003_r0001", "weight": 0.5},
-    ]
-    sat = {
-        "c0001_r0001": sat_row(cell_id="c0001_r0001", lst_mean=40.0, n_scenes=11),
-        "c0002_r0001": sat_row(cell_id="c0002_r0001", lst_mean=46.0, n_scenes=10),
-        # cloudy cell: values nulled, must not pull the mean
-        "c0003_r0001": s.clean_satellite_row(sat_row(cell_id="c0003_r0001", valid_pixel_ratio=0.2)),
-    }
-    bld = {
-        "c0001_r0001": {"builtup_pct": 40.0, "building_count": 20, "in_cover": True},
-        "c0002_r0001": {"builtup_pct": 10.0, "building_count": 4, "in_cover": True},
-        "c0003_r0001": {"builtup_pct": 0.0, "building_count": 0, "in_cover": False},
-    }
-    out = s.summarize_community("C0001", "season_2026_03-05", cells, sat, bld)
-    assert list(out) == [n for n, _ in s.COMMUNITY_SUMMARY]
-    assert out["n_cells"] == 3 and out["area_m2"] == 2 * g.GRID_SIZE_M ** 2
-    assert out["lst_mean"] == pytest.approx((40 * 1 + 46 * 0.5) / 1.5)
-    assert out["lst_p90"] == 46.0
-    assert out["n_scenes"] == 10
-    assert out["valid_pixel_ratio"] == pytest.approx((1 * 1 + 1 * 0.5 + 0.2 * 0.5) / 2)
-    assert out["in_cover_ratio"] == pytest.approx(0.75)
-    assert out["builtup_pct"] == pytest.approx((40 + 10 * 0.5) / 1.5)
-    assert out["building_count"] == 22
-
-
-def test_summarize_without_buildings_and_missing_cells():
-    cells = [{"community_id": "C0002", "method": "buffer_300", "cell_id": "c0009_r0009", "weight": 1.0}]
-    out = s.summarize_community("C0002", "year_2026", cells, {}, None)
-    assert out["lst_mean"] is None and out["valid_pixel_ratio"] == 0.0
-    assert out["builtup_pct"] is None
-    with pytest.raises(ValueError):
-        s.summarize_community("C0002", "year_2026", [], {})
-
-
 # ── S3 keys ──────────────────────────────────────────────────────────────────
 
 def test_s3_keys():
@@ -161,9 +83,5 @@ def test_s3_keys():
     assert s.s3_key_satellite_grid("season_2026_03-05") == (
         "trusted/satellite_grid/period_type=season/year=2026/season_2026_03-05.parquet")
     assert s.s3_key_buildings_grid(2026) == "trusted/buildings_grid/year=2026/buildings_2026.parquet"
-    assert s.s3_key_community_summary("buffer_300", "year_2026") == (
-        "curated/community_summary/method=buffer_300/year=2026/year_2026.parquet")
-    with pytest.raises(ValueError):
-        s.s3_key_community_summary("buffer_1000", "year_2026")
     with pytest.raises(ValueError):
         s.s3_prefix_raw_static("../x")

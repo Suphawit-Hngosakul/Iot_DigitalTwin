@@ -1,10 +1,8 @@
-"""Satellite + community schema (90 m grid -> community).
+"""Satellite schema (Landsat pixels -> 90 m grid).
 
-Layers (each its own table, a community never reads satellite pixels directly):
+Layers:
   1. Landsat 30 m pixels (GEE, raw GeoTIFF)          -> not a table
   2. grid_cells, satellite_grid, buildings_grid      -> per 90 m cell (grid.py)
-  3. community_cells                                  -> which cells a community covers
-  4. community_summary                                -> weighted mean of its cells
 
 Sources: LST, NDVI, NDBI all from Landsat 8/9 C2 L2 (one sensor, one pixel grid).
 Buildings: BMA building.shp first, Google Open Buildings (conf >= 0.7) to fill gaps;
@@ -13,13 +11,11 @@ only per-cell summaries leave GEE (footprints must not be published).
 
 from __future__ import annotations
 
-import csv
 import math
 import re
 from dataclasses import dataclass
 from datetime import date, timedelta
-from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Mapping
 
 from . import grid
 
@@ -130,47 +126,15 @@ BUILDINGS_GRID: tuple[tuple[str, str], ...] = (
     ("bldg_source", "string"),
 )
 
-COMMUNITIES_COLUMNS = ("community_id", "name", "district", "lat", "lon", "source")
-
-COMMUNITY_CELLS: tuple[tuple[str, str], ...] = (
-    ("community_id", "string"),
-    ("method", "string"),
-    ("cell_id", "string"),
-    ("weight", "double"),          # share of the cell inside the community area
-)
-
-COMMUNITY_SUMMARY_PARTITIONS = (("method", "string"), ("year", "int"))
-COMMUNITY_SUMMARY: tuple[tuple[str, str], ...] = (
-    ("community_id", "string"),
-    ("period", "string"),
-    ("n_cells", "int"),
-    ("area_m2", "double"),
-    ("n_scenes", "int"),
-    ("clear_obs_mean", "double"),
-    ("valid_pixel_ratio", "double"),
-    ("lst_mean", "double"),
-    ("lst_p90", "double"),         # p90 of the cells' lst_mean (not of pixels)
-    ("ndvi_mean", "double"),
-    ("ndbi_mean", "double"),
-    ("green_ratio", "double"),
-    ("builtup_pct", "double"),
-    ("building_count", "int"),
-    ("in_cover_ratio", "double"),
-)
-
 TABLES = {
     "grid_cells": GRID_CELLS,
     "satellite_grid": SATELLITE_GRID,
     "buildings_grid": BUILDINGS_GRID,
-    "community_cells": COMMUNITY_CELLS,
-    "community_summary": COMMUNITY_SUMMARY,
 }
 PARTITIONS = {
     "grid_cells": (),
     "satellite_grid": SATELLITE_GRID_PARTITIONS,
     "buildings_grid": BUILDINGS_GRID_PARTITIONS,
-    "community_cells": (),
-    "community_summary": COMMUNITY_SUMMARY_PARTITIONS,
 }
 
 
@@ -203,11 +167,8 @@ RANGES: dict[str, tuple[float, float]] = {
     "building_count": (0, math.inf),
     "floors_mean": (1.0, 200.0),
     "far": (0.0, 50.0),
-    "weight": (0.0, 1.0),
 }
 SATELLITE_VALUE_COLS = ("lst_mean", "lst_p90", "ndvi_mean", "ndbi_mean", "green_ratio")
-METHODS = {"buffer_300": 300.0, "buffer_500": 500.0, "polygon": None}
-COMMUNITY_ID_RE = re.compile(r"^C\d{4}$")
 
 
 def out_of_range(row: Mapping) -> list[str]:
@@ -250,125 +211,6 @@ def clean_satellite_row(row: Mapping) -> dict:
         for c in SATELLITE_VALUE_COLS:
             out[c] = None
     return out
-
-
-# =============================================================================
-#  Communities
-# =============================================================================
-
-@dataclass(frozen=True)
-class Community:
-    community_id: str
-    name: str
-    district: str
-    lat: float
-    lon: float
-    source: str
-
-
-def load_communities(path: str | Path) -> list[Community]:
-    """communities.csv from CS341-RONNAI gee/ (UTF-8, BOM tolerated)."""
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        if tuple(reader.fieldnames or ()) != COMMUNITIES_COLUMNS:
-            raise ValueError(f"communities.csv header must be {','.join(COMMUNITIES_COLUMNS)}")
-        out, seen = [], set()
-        for i, r in enumerate(reader, start=2):
-            cid = r["community_id"]
-            if not COMMUNITY_ID_RE.match(cid):
-                raise ValueError(f"line {i}: bad community_id {cid!r}")
-            if cid in seen:
-                raise ValueError(f"line {i}: duplicate community_id {cid}")
-            seen.add(cid)
-            out.append(Community(cid, r["name"], r["district"],
-                                 float(r["lat"]), float(r["lon"]), r["source"]))
-    return out
-
-
-def community_cells_buffer(c: Community, method: str) -> list[dict]:
-    """community_cells rows for a point + buffer method."""
-    radius = METHODS.get(method)
-    if radius is None:
-        raise ValueError(f"{method!r} is not a buffer method")
-    x, y = grid.latlon_to_xy(c.lat, c.lon)
-    return [
-        {"community_id": c.community_id, "method": method, "cell_id": cid, "weight": w}
-        for cid, w in grid.cells_in_circle(x, y, radius)
-    ]
-
-
-def weighted_mean(pairs: Iterable[tuple[float | None, float]]) -> float | None:
-    num = den = 0.0
-    for v, w in pairs:
-        if v is None or w <= 0:
-            continue
-        num += v * w
-        den += w
-    return num / den if den else None
-
-
-def weighted_quantile(pairs: Iterable[tuple[float | None, float]], q: float) -> float | None:
-    """Weighted quantile (lower) of values; None-valued pairs are ignored."""
-    pts = sorted((v, w) for v, w in pairs if v is not None and w > 0)
-    if not pts:
-        return None
-    total = sum(w for _, w in pts)
-    acc = 0.0
-    for v, w in pts:
-        acc += w
-        if acc >= q * total - 1e-12:
-            return v
-    return pts[-1][0]
-
-
-def summarize_community(
-    community_id: str,
-    period: str,
-    cells: Iterable[Mapping],
-    satellite: Mapping[str, Mapping],
-    buildings: Mapping[str, Mapping] | None = None,
-) -> dict:
-    """One community_summary row.
-
-    cells     : community_cells rows of ONE community and ONE method
-    satellite : cell_id -> satellite_grid row of this period (already cleaned)
-    buildings : cell_id -> buildings_grid row (optional)
-    Satellite means are weighted by weight x valid_pixel_ratio; building values
-    by weight only, and only over cells with in_cover.
-    """
-    cells = list(cells)
-    if not cells:
-        raise ValueError(f"{community_id}: no cells")
-    cell_area = grid.GRID_SIZE_M ** 2
-    out: dict = {
-        "community_id": community_id,
-        "period": period,
-        "n_cells": len(cells),
-        "area_m2": sum(c["weight"] for c in cells) * cell_area,
-    }
-
-    sat = [(satellite.get(c["cell_id"]), c["weight"]) for c in cells]
-    sat_w = [(r, w * (r.get("valid_pixel_ratio") or 0.0)) for r, w in sat if r]
-    for col in ("lst_mean", "ndvi_mean", "ndbi_mean", "green_ratio"):
-        out[col] = weighted_mean((r.get(col), w) for r, w in sat_w)
-    out["lst_p90"] = weighted_quantile(((r.get("lst_mean"), w) for r, w in sat_w), 0.9)
-    out["valid_pixel_ratio"] = weighted_mean(
-        ((r.get("valid_pixel_ratio") if r else 0.0), w) for r, w in sat)
-    out["clear_obs_mean"] = weighted_mean((r.get("clear_obs_mean"), w) for r, w in sat if r)
-    n = [r.get("n_scenes") for r, _ in sat if r and r.get("n_scenes") is not None]
-    out["n_scenes"] = min(n) if n else None   # dates every cell has at least
-
-    if buildings is not None:
-        b = [(buildings.get(c["cell_id"]), c["weight"]) for c in cells]
-        covered = [(r, w) for r, w in b if r and r.get("in_cover")]
-        total_w = sum(w for _, w in b)
-        out["in_cover_ratio"] = sum(w for _, w in covered) / total_w if total_w else None
-        out["builtup_pct"] = weighted_mean((r.get("builtup_pct"), w) for r, w in covered)
-        cnt = [(r.get("building_count"), w) for r, w in covered if r.get("building_count") is not None]
-        out["building_count"] = round(sum(v * w for v, w in cnt)) if cnt else None
-    else:
-        out.update(in_cover_ratio=None, builtup_pct=None, building_count=None)
-    return {name: out.get(name) for name, _ in COMMUNITY_SUMMARY}
 
 
 # =============================================================================
@@ -445,14 +287,6 @@ def s3_key_satellite_grid(period: str) -> str:
 
 def s3_key_buildings_grid(year: int) -> str:
     return f"trusted/buildings_grid/year={year}/buildings_{year}.parquet"
-
-
-def s3_key_community_summary(method: str, period: str) -> str:
-    if method not in METHODS:
-        raise ValueError(f"unknown method: {method!r}")
-    p = parse_period(period)
-    return (f"curated/community_summary/method={method}/"
-            f"year={p.year}/{period}.parquet")
 
 
 def s3_key_validation(batch_id: str) -> str:

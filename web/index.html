@@ -17,12 +17,6 @@
       </div>
     </div>
 
-    <!-- สลับหมวดหมู่ 2 โปรเจกต์ -->
-    <div class="ws-switch" role="group" aria-label="เลือกโหมดโปรเจกต์">
-      <button id="mode-p2" data-ws="project2" class="active">Project 2 · IoT &amp; ความร้อน</button>
-      <button id="mode-cs341" data-ws="cs341">CS341 · ชุมชนเปราะบาง</button>
-    </div>
-
     <!-- เมนูหลัก 3 แท็บ -->
     <nav id="tabs">
       <button data-tab="map" class="active">1. แผนที่ &amp; ชั้นข้อมูล</button>
@@ -67,22 +61,10 @@
           </select>
         </div>
 
-        <!-- หมวด 1: พื้นที่ชุมชนและอาคาร -->
+        <!-- หมวด 1: อาคาร -->
         <details class="layer-card cat-amber" open>
-          <summary><span class="cat-dot amber"></span>1. พื้นที่ชุมชน &amp; อาคาร 3D</summary>
+          <summary><span class="cat-dot amber"></span>1. อาคาร 3D</summary>
           <div class="layer-body">
-            <!-- แสดงเฉพาะโหมด CS341 -->
-            <div id="grp-community" class="sub-block hidden">
-              <div class="sub-title">ชุมชนเปราะบาง 36 แห่ง (CS341)</div>
-              <label class="row"><input type="checkbox" id="comm-on" checked /> แสดงขอบเขตชุมชน (รัศมี 150 ม.)</label>
-              <div class="legend">
-                <span class="sw" style="background:#ef4444"></span>เปราะบางสูง
-                <span class="sw" style="background:#f59e0b"></span>ปานกลาง
-                <span class="sw" style="background:#10b981"></span>เปราะบางต่ำกว่าเกณฑ์
-              </div>
-              <p class="note" id="comm-note">กำลังโหลดข้อมูลชุมชน…</p>
-            </div>
-
             <div id="grp-buildings" class="sub-block">
               <div class="sub-title">
                 <span>อาคารรายหลัง 3D (building.shp)</span>
@@ -366,75 +348,9 @@
         </div>
       </div>
 
-      <!-- มุมมองย่อย 2.3: วิเคราะห์ความเปราะบาง จำลองสมมติฐาน และเปรียบเทียบ 2 ชุมชน (CS341) -->
-      <div id="cs341-stats-view" class="hidden">
-        <div class="res-wrap">
-          <div class="res-hero" style="background: linear-gradient(135deg, #b91c1c, #d97706); margin-bottom: 12px;">
-            <div>
-              <h2>วิเคราะห์ความเปราะบาง จำลองสมมติฐาน และเปรียบเทียบชุมชน (CS341)</h2>
-              <p>สีวงกลมบนแผนที่แสดง <b>ระดับความเปราะบาง (ไม่ใช่ °C)</b> ส่วนการจำลองเพิ่มต้นไม้ 10–200 ต้นเป็น
-                <b>ค่าสมมติเชิงจำลอง</b> อิงตัวแปรของแต่ละชุมชน (ยังไม่ได้ลงพื้นที่จริง)
-              </p>
-            </div>
-          </div>
-
-          <div id="cs341-kpis" class="cards"></div>
-
-          <div id="cs341-compare-dashboard"></div>
-
-          <div id="cs341-sim-dashboard"></div>
-
-          <h3 style="margin: 14px 0 8px; font-size: 14.5px;">3 ชุมชนคะแนนความเปราะบางสูงสุดในดัชนี</h3>
-          <div id="cs341-top-spotlight" class="takeaway-grid"></div>
-
-          <div class="grid2" style="margin-bottom: 12px;">
-            <div class="card">
-              <h3>1. 10 อันดับชุมชนที่มีคะแนนความเปราะบางสูงสุด</h3>
-              <div class="chart" id="cs341-c-bar"></div>
-            </div>
-            <div class="card">
-              <h3>2. ความหนาแน่นอาคาร vs ความร้อน LST (ขนาดจุด = ความขาดแคลนพื้นที่สีเขียว)</h3>
-              <div class="chart" id="cs341-c-scatter"></div>
-            </div>
-          </div>
-
-          <div class="card" style="margin-bottom: 12px;">
-            <h3>
-              <span>3. ตารางชุมชน (เรียงจากเปราะบางสุด → น้อยสุด)</span>
-              <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <select id="cs341-filter-district">
-                  <option value="all">ทุกเขตพื้นที่</option>
-                </select>
-                <select id="cs341-filter-tier">
-                  <option value="all">ทุกระดับความเปราะบาง</option>
-                  <option value="high">เปราะบางสูง</option>
-                  <option value="moderate">ปานกลาง</option>
-                  <option value="low">เปราะบางต่ำกว่าเกณฑ์</option>
-                </select>
-              </div>
-            </h3>
-            <div class="table-scroll">
-              <table class="res-table">
-                <thead>
-                  <tr>
-                    <th>อันดับ</th>
-                    <th>ชื่อชุมชน / เขต</th>
-                    <th>ระดับความเปราะบาง</th>
-                    <th>LST (300 ม.)</th>
-                    <th>อาคาร (%)</th>
-                    <th>พื้นที่สีเขียว</th>
-                    <th>ดูบนแผนที่ · จำลอง · เปรียบเทียบ</th>
-                  </tr>
-                </thead>
-                <tbody id="cs341-ranking-body"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
     </section>
 
-    <!-- ③ Realtime & ข้อมูลย้อนหลัง IoT (ซ่อนอัตโนมัติในโหมด CS341) -->
+    <!-- ③ Realtime & ข้อมูลย้อนหลัง IoT -->
     <section id="tab-iot" class="tab">
       <div class="stats-toolbar">
         <div class="live-status-wrap">

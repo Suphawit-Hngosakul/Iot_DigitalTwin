@@ -14,7 +14,6 @@ python -m pytest -q
 | ไฟล์ | มีอะไร |
 |---|---|
 | `fixtures/good.csv` | 4 แถวจาก IOTW-A001: แถว 1–2 ปกติ, แถว 3 ไมค์/DHT/GPS เสีย (`SPL_ERR;DHT_ERR;GPS_MISSING` ค่าว่าง), แถว 4 HDOP 6.5 (`GPS_POOR`) |
-| `fixtures/communities.csv` | 36 ชุมชนจาก CS341-RONNAI `gee/communities.csv` (BMA open data) |
 | `fixtures/no_rtc.csv` | 2 แถวจาก IOTW-A002 ที่เวลาเชื่อไม่ได้: DateTime เป็นเลข `12345` และ `2000-01-01 00:00:05` + `Time_Valid=0` |
 
 ## test_schema.py (37 ข้อ)
@@ -94,7 +93,7 @@ python -m pytest -q
 | `test_cells_in_circle_rejects_bad_radius` | รัศมี 0 หรือวงกลมเลยขอบกริด → error |
 | `test_pure_python_utm47n_matches_pyproj` | สูตร UTM 47N ที่เขียนเอง (ใช้บน Lambda ที่ไม่มี pyproj) ได้ค่าตรงกับ pyproj |
 
-## test_satellite_schema.py — ดาวเทียม + ชุมชน (`common/satellite_schema.py`)
+## test_satellite_schema.py — ดาวเทียม (`common/satellite_schema.py`)
 
 | test | ตรวจอะไร |
 |---|---|
@@ -103,12 +102,6 @@ python -m pytest -q
 | `test_scene_row_counts_one_date` | แถวรายฉากต้องมี n_scenes 0 หรือ 1 (ภาพวันเดียวกันจาก 2 row นับครั้งเดียว) |
 | `test_clean_nulls_low_coverage` | พิกเซลใช้ได้ < 50% ของเซลล์ → ค่าดาวเทียมเป็น null |
 | `test_tables_do_not_repeat_partition_keys` / `test_arrow_schema` | ตารางไม่ซ้ำคอลัมน์ partition และสร้าง pyarrow schema ได้ |
-| `test_load_real_communities` | โหลด `fixtures/communities.csv` (36 ชุมชน หลักสี่ + ดอนเมือง) ได้ |
-| `test_load_communities_rejects_duplicates` | community_id ซ้ำ → error |
-| `test_buffer_cells_for_every_community` | ทุกชุมชนได้เซลล์ ≈ 35 (300 m) และ ≈ 97 (500 m) |
-| `test_weighted_helpers` | ค่าเฉลี่ยถ่วงน้ำหนักและ quantile ถ่วงน้ำหนักถูก |
-| `test_summarize_community` | สรุปชุมชน 3 เซลล์ (1 เซลล์เมฆบัง, 1 เซลล์ไม่มีข้อมูลอาคาร) ได้ lst_mean, p90, n_scenes, builtup_pct, building_count ตามคำนวณมือ |
-| `test_summarize_without_buildings_and_missing_cells` | ไม่มีข้อมูลดาวเทียม/อาคาร → null, ไม่มีเซลล์ → error |
 | `test_s3_keys` | path ของ raw/trusted/curated ถูกรูป และชื่อผิด → error |
 
 ## ยังไม่มี (ต้องทำก่อนปิด #2)

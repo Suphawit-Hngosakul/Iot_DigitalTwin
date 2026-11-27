@@ -1,6 +1,6 @@
 """Data contracts (spec 32, D23): validation rules as YAML, one file per source.
 
-Same format and rule levels as CS341-RONNAI `contracts/*.yaml` + `validate_gate.py`:
+Rule levels (one YAML file per source in `contracts/`):
 
   BLOCK  in batch_checks -> the whole batch FAILs (quarantine/batch/)
   BLOCK  in columns      -> that row is dropped     (quarantine/rows/)
