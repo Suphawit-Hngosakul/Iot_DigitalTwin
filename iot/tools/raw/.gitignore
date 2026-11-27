@@ -1,0 +1,3 @@
+# raw field logs (real data) - do not commit
+*
+!.gitignore
