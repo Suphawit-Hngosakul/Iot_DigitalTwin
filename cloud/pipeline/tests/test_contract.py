@@ -1,4 +1,4 @@
-"""Data contracts (spec 32, D23): YAML loads, levels behave like CS341-RONNAI."""
+"""Data contracts (spec 32, D23): YAML loads, levels BLOCK / STANDARDIZE / WARN behave as specified."""
 import csv
 import io
 

@@ -611,14 +611,6 @@ def get_analytics(params: dict) -> dict:
     raise ApiError(404, f"no analytics {metric} for {period} ({match})")
 
 
-def get_community(params: dict) -> dict:
-    s3 = _s3_client()
-    data = _read_json(s3, "curated/community/community_heat.geojson")
-    if data is None:
-        raise ApiError(404, "no published community data yet")
-    return data
-
-
 ROUTES = {
     "/devices": get_devices,
     "/latest": get_latest,
@@ -626,7 +618,6 @@ ROUTES = {
     "/quality": get_quality,
     "/layers": get_layers,
     "/grid": get_grid,
-    "/community": get_community,
 }
 GRID_CELL_PREFIX = "/grid/"
 ANALYTICS_PREFIX = "/analytics/"

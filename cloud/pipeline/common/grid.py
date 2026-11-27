@@ -1,6 +1,6 @@
 """Central 90 m grid (issue #29).
 
-Every satellite / building / community value is summarised per 90 x 90 m cell
+Every satellite / building / IoT value is summarised per 90 x 90 m cell
 (= 3 x 3 Landsat pixels). The grid lives in EPSG:32647 (UTM 47N) and its edges
 sit exactly on Landsat pixel edges, so a cell never splits a pixel.
 

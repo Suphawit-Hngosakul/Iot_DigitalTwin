@@ -2,12 +2,6 @@ import maplibregl from "maplibre-gl";
 import * as echarts from "echarts";
 import { api, toMinuteObjects } from "./api";
 import { AOI, cellOf, getMockBuildingsGeoJson, LEGENDS } from "./mock-api";
-import {
-  bindCommunitySimulationEvents,
-  buildCommunitySimulationHtml,
-  evaluateAllCommunities,
-  type CommunityPriorityResult,
-} from "./community-priority";
 import type {
   AnalyticsHotspot,
   BuildingsGeoJson,
@@ -18,8 +12,6 @@ import type {
   LayerLegend,
   ReadingsResponse,
 } from "./types";
-
-export type ProjectMode = "project2" | "cs341";
 
 const GRID_STOPS: Record<string, [number, string][]> = {
   lst_mean: LEGENDS.lst.stops,
@@ -226,23 +218,6 @@ function buildVerdictHtml(lst: unknown, air?: unknown, includeAir = true): strin
   `;
 }
 
-function getGeometryCenter(geom: GeoJSON.Geometry | null | undefined): [number, number] | null {
-  if (!geom) return null;
-  const coords: [number, number][] = [];
-  const collect = (c: unknown) => {
-    if (Array.isArray(c) && c.length >= 2 && typeof c[0] === "number" && typeof c[1] === "number") {
-      coords.push([c[0], c[1]]);
-    } else if (Array.isArray(c)) {
-      c.forEach(collect);
-    }
-  };
-  if ("coordinates" in geom) collect(geom.coordinates);
-  if (!coords.length) return null;
-  const lngs = coords.map((p) => p[0]);
-  const lats = coords.map((p) => p[1]);
-  return [(Math.min(...lngs) + Math.max(...lngs)) / 2, (Math.min(...lats) + Math.max(...lats)) / 2];
-}
-
 const hex = (c: [number, number, number]) => "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
 function normStops(lg?: LayerLegend): [number, string][] | null {
   if (!lg?.stops) return null;
@@ -273,28 +248,19 @@ export class MapController {
   grid: GridFeatureCollection | null = null;
   devices: DeviceInfo[] = [];
   stationMarkers: maplibregl.Marker[] = [];
-  communityRankings: CommunityPriorityResult[] = [];
-  private communityFeatures: GeoJSON.Feature[] = [];
   private liveMarker: maplibregl.Marker | null = null;
   private liveCoords: [number, number] | null = null;
   private liveRefreshTimer: number | null = null;
   private liveInfo: { devId: string; ts: string; row: Record<string, unknown> } | null = null;
-  projectMode: ProjectMode = "project2";
   fitted = false;
   pitched = true;
   private drawerChart: echarts.ECharts | null = null;
-  private onCommunitiesLoaded?: (features: GeoJSON.Feature[]) => void;
-  private onCompareCommunity?: (communityId: string) => void;
 
   constructor(
     private getPeriod: () => string | null,
     private setPeriod: (p: string, periods: LayersResponse["periods"]) => void,
-    private getMatch: () => "all" | "window",
-    onCommunitiesLoaded?: (features: GeoJSON.Feature[]) => void,
-    onCompareCommunity?: (communityId: string) => void
+    private getMatch: () => "all" | "window"
   ) {
-    this.onCommunitiesLoaded = onCommunitiesLoaded;
-    this.onCompareCommunity = onCompareCommunity;
     this.map = new maplibregl.Map({
       container: "map",
       style: {
@@ -383,57 +349,6 @@ export class MapController {
     }
   }
 
-  setProjectMode(mode: ProjectMode) {
-    this.projectMode = mode;
-    const isCs341 = mode === "cs341";
-
-    document.getElementById("grp-community")?.classList.toggle("hidden", !isCs341);
-    document.getElementById("grp-iot-track")?.classList.toggle("hidden", isCs341);
-
-    const commChecked = (document.getElementById("comm-on") as HTMLInputElement | null)?.checked !== false;
-    const commVis = isCs341 && commChecked ? "visible" : "none";
-    ["comm-fill", "comm-outline"]
-      .filter((l) => this.map.getLayer(l))
-      .forEach((l) => this.map.setLayoutProperty(l, "visibility", commVis));
-
-    const trackChecked = (document.getElementById("track-on") as HTMLInputElement | null)?.checked !== false;
-    const iotVis = !isCs341 && trackChecked ? "visible" : "none";
-    ["track-pts", "track-line"]
-      .filter((l) => this.map.getLayer(l))
-      .forEach((l) => this.map.setLayoutProperty(l, "visibility", iotVis));
-
-    this.stationMarkers.forEach((mk) => {
-      mk.getElement().style.display = isCs341 ? "none" : "";
-    });
-
-    if (this.liveMarker) {
-      this.liveMarker.getElement().style.display = isCs341 ? "none" : "";
-    }
-  }
-
-  async focusCommunityById(communityId: string) {
-    if (!this.communityFeatures.length) {
-      await this.loadCommunities();
-    }
-    const feat = this.communityFeatures.find(
-      (f) => String(f.properties?.community_id || "") === communityId
-    );
-    if (!feat) return;
-
-    const commCb = document.getElementById("comm-on") as HTMLInputElement | null;
-    if (commCb && !commCb.checked) commCb.checked = true;
-    ["comm-fill", "comm-outline"]
-      .filter((l) => this.map.getLayer(l))
-      .forEach((l) => this.map.setLayoutProperty(l, "visibility", "visible"));
-
-    const center = getGeometryCenter(feat.geometry);
-    if (center) {
-      this.map.easeTo({ center, zoom: 16, duration: 600 });
-    }
-    this.highlightFeature(feat.geometry);
-    this.openCommunityDashboard(feat.properties || {});
-  }
-
   private bindUi() {
     document.getElementById("drawer-close")!.onclick = () => this.closeDrawer();
 
@@ -442,16 +357,6 @@ export class MapController {
       this.map.setLayoutProperty("osm", "visibility", val === "osm" ? "visible" : "none");
       this.map.setLayoutProperty("imagery", "visibility", val === "imagery" ? "visible" : "none");
     };
-
-    const commCb = document.getElementById("comm-on") as HTMLInputElement | null;
-    if (commCb) {
-      commCb.onchange = (e) => {
-        const show = this.projectMode === "cs341" && (e.target as HTMLInputElement).checked;
-        ["comm-fill", "comm-outline"]
-          .filter((l) => this.map.getLayer(l))
-          .forEach((l) => this.map.setLayoutProperty(l, "visibility", show ? "visible" : "none"));
-      };
-    }
 
     (document.getElementById("bldg-on") as HTMLInputElement).onchange = (e) => {
       const vis = (e.target as HTMLInputElement).checked ? "visible" : "none";
@@ -486,7 +391,7 @@ export class MapController {
     };
     (document.getElementById("track-date") as HTMLInputElement).onchange = () => this.loadTrack();
     (document.getElementById("track-on") as HTMLInputElement).onchange = (e) => {
-      const show = this.projectMode === "project2" && (e.target as HTMLInputElement).checked;
+      const show = (e.target as HTMLInputElement).checked;
       ["track-pts", "track-line"].filter((l) => this.map.getLayer(l)).forEach((l) => this.map.setLayoutProperty(l, "visibility", show ? "visible" : "none"));
     };
 
@@ -505,26 +410,9 @@ export class MapController {
     this.map.on("mouseenter", "bldg-3d", () => (this.map.getCanvas().style.cursor = "pointer"));
     this.map.on("mouseleave", "bldg-3d", () => (this.map.getCanvas().style.cursor = ""));
 
-    this.map.on("click", "comm-fill", (e) => {
-      if (this.projectMode !== "cs341") return;
-      const bldgHits = this.map.queryRenderedFeatures(e.point, {
-        layers: this.map.getLayer("bldg-3d") ? ["bldg-3d"] : [],
-      });
-      if (bldgHits.length > 0) return;
-      const feat = e.features?.[0];
-      this.highlightFeature((feat?.geometry as GeoJSON.Geometry) || null);
-      this.openCommunityDashboard(feat?.properties || {});
-    });
-    this.map.on("mouseenter", "comm-fill", () => (this.map.getCanvas().style.cursor = "pointer"));
-    this.map.on("mouseleave", "comm-fill", () => (this.map.getCanvas().style.cursor = ""));
-
     this.map.on("click", "grid-hit", (e) => {
       const bldgHits = this.map.queryRenderedFeatures(e.point, { layers: this.map.getLayer("bldg-3d") ? ["bldg-3d"] : [] });
       if (bldgHits.length > 0) return;
-      if (this.projectMode === "cs341") {
-        const commHits = this.map.queryRenderedFeatures(e.point, { layers: this.map.getLayer("comm-fill") ? ["comm-fill"] : [] });
-        if (commHits.length > 0) return;
-      }
       const cellId = e.features?.[0]?.properties?.cell_id;
       if (cellId) this.openCellDashboard(String(cellId));
     });
@@ -536,12 +424,10 @@ export class MapController {
     this.map.on("load", async () => {
       await this.loadLayers();
       await this.loadGrid();
-      await this.loadCommunities();
       await this.loadBuildings();
       await this.loadHotspot();
       await this.loadDevicesOnMap();
       await this.loadTrack();
-      this.setProjectMode(this.projectMode);
     });
   }
 
@@ -549,165 +435,6 @@ export class MapController {
     await this.loadLayers();
     await this.loadGrid();
     await this.loadHotspot();
-  }
-
-  async loadCommunities() {
-    const note = document.getElementById("comm-note");
-    const data = await api<GeoJSON.FeatureCollection>("/community").catch(() => null);
-    if (!data?.features?.length) {
-      if (note) note.textContent = "ยังไม่มีข้อมูลชุมชนในระบบ API";
-      return;
-    }
-
-    this.communityFeatures = data.features;
-    this.communityRankings = evaluateAllCommunities(data.features);
-    if (this.onCommunitiesLoaded) {
-      this.onCommunitiesLoaded(data.features);
-    }
-
-    if (note) {
-      note.innerHTML = `พบ <b>${data.features.length} ชุมชน</b> · สีวงกลมแสดงระดับความเปราะบาง (ไม่ใช่ °C)`;
-    }
-
-    const existing = this.map.getSource("communities") as maplibregl.GeoJSONSource | undefined;
-    if (existing) {
-      existing.setData(data);
-      return;
-    }
-
-    const visible = this.projectMode === "cs341" ? "visible" : "none";
-    this.map.addSource("communities", { type: "geojson", data });
-    const colorExpr = [
-      "match",
-      ["get", "risk_level"],
-      "high", "#ef4444",
-      "medium", "#f59e0b",
-      "low", "#10b981",
-      "#6366f1",
-    ] as unknown as maplibregl.ExpressionSpecification;
-
-    this.map.addLayer({
-      id: "comm-fill",
-      type: "fill",
-      source: "communities",
-      layout: { visibility: visible },
-      paint: { "fill-color": colorExpr, "fill-opacity": 0.32 },
-    });
-    this.map.addLayer({
-      id: "comm-outline",
-      type: "line",
-      source: "communities",
-      layout: { visibility: visible },
-      paint: { "line-color": colorExpr, "line-width": 2 },
-    });
-  }
-
-  private openCommunityDashboard(props: Record<string, unknown>) {
-    const cid = String(props.community_id || "");
-    const evaluated =
-      this.communityRankings.find((c) => c.id === cid) ||
-      evaluateAllCommunities([{ properties: props }])[0];
-
-    const pct = (v: unknown) => (v != null && v !== "" ? `${fmt(Number(v) * 100, 1)} %` : "—");
-
-    const html = `
-      ${buildCommunitySimulationHtml(evaluated, 50)}
-      ${buildVerdictHtml(props.lst_mean_300, null, false)}
-
-      <div class="d-kpis">
-        <div class="d-kpi warm">
-          <div class="lbl">อุณหภูมิพื้นผิว (300 ม.)</div>
-          <div class="val">${fmt(props.lst_mean_300, 2)} °C</div>
-          <div class="sub">ช่วงพีค p90: ${fmt(props.lst_p90_300, 2)} °C</div>
-        </div>
-        <div class="d-kpi amber">
-          <div class="lbl">ความหนาแน่นอาคาร (300 ม.)</div>
-          <div class="val">${fmt(props.builtup_pct_300, 1)} %</div>
-          <div class="sub">จำนวน ${fmt(props.building_count_300, 0)} หลัง</div>
-        </div>
-        <div class="d-kpi cool">
-          <div class="lbl">พื้นที่สีเขียว (300 ม.)</div>
-          <div class="val">${pct(props.green_ratio_300)}</div>
-          <div class="sub">ดัชนี NDVI: ${fmt(props.ndvi_mean_300, 3)}</div>
-        </div>
-        <div class="d-kpi blue">
-          <div class="lbl">อุณหภูมิพื้นผิว (500 ม.)</div>
-          <div class="val">${fmt(props.lst_mean_500, 2)} °C</div>
-          <div class="sub">อาคาร ${fmt(props.builtup_pct_500, 1)} %</div>
-        </div>
-      </div>
-
-      <div class="d-card">
-        <h4>เปรียบเทียบสภาพแวดล้อม รัศมี 300 ม. vs 500 ม.</h4>
-        <div id="drawer-chart" class="d-chart"></div>
-      </div>
-
-      <div class="d-card">
-        <h4>ตารางตัวชี้วัดรายรัศมี (ปี 2026)</h4>
-        <table class="d-table">
-          <thead><tr><th>ตัวชี้วัด</th><th>รัศมี 300 ม.</th><th>รัศมี 500 ม.</th></tr></thead>
-          <tbody>
-            <tr><td>อุณหภูมิพื้นผิวเฉลี่ย<span class="var-code">lst_mean</span></td><td><b>${fmt(props.lst_mean_300, 2)} °C</b></td><td>${fmt(props.lst_mean_500, 2)} °C</td></tr>
-            <tr><td>อุณหภูมิพื้นผิวสูงสุด 90th<span class="var-code">lst_p90</span></td><td>${fmt(props.lst_p90_300, 2)} °C</td><td>${fmt(props.lst_p90_500, 2)} °C</td></tr>
-            <tr><td>ดัชนีพืชพรรณ<span class="var-code">ndvi_mean</span></td><td>${fmt(props.ndvi_mean_300, 3)}</td><td>${fmt(props.ndvi_mean_500, 3)}</td></tr>
-            <tr><td>สัดส่วนพื้นที่สีเขียว<span class="var-code">green_ratio</span></td><td>${pct(props.green_ratio_300)}</td><td>${pct(props.green_ratio_500)}</td></tr>
-            <tr><td>ความหนาแน่นอาคาร<span class="var-code">builtup_pct</span></td><td><b>${fmt(props.builtup_pct_300, 1)} %</b></td><td>${fmt(props.builtup_pct_500, 1)} %</td></tr>
-            <tr><td>จำนวนอาคารโดยรอบ<span class="var-code">building_count</span></td><td>${fmt(props.building_count_300, 0)} หลัง</td><td>${fmt(props.building_count_500, 0)} หลัง</td></tr>
-          </tbody>
-        </table>
-      </div>
-    `;
-
-    this.openDrawer({
-      theme: evaluated.theme,
-      badge: `อันดับ #${evaluated.rank}/${evaluated.total} · ${String(props.community_id || "CS341")}`,
-      title: String(props.name || props.community_id || "ชุมชน"),
-      sub: `เขต${String(props.district || "—")} · ${evaluated.tierLabel}`,
-      html,
-      onReady: () => {
-        bindCommunitySimulationEvents(
-          document.getElementById("comm-sim-box"),
-          evaluated,
-          (targetId) => {
-            this.closeDrawer();
-            if (this.onCompareCommunity) this.onCompareCommunity(targetId);
-          }
-        );
-
-        const el = document.getElementById("drawer-chart");
-        if (!el) return;
-        this.drawerChart = echarts.init(el);
-        this.drawerChart.setOption({
-          tooltip: { trigger: "axis" },
-          legend: { top: 0, textStyle: { fontSize: 11 } },
-          grid: { left: 40, right: 12, top: 28, bottom: 24 },
-          xAxis: { type: "category", data: ["LST (°C)", "อาคาร (%)", "สีเขียว (%)"] },
-          yAxis: { type: "value" },
-          series: [
-            {
-              name: "รัศมี 300 ม.",
-              type: "bar",
-              data: [
-                Number(props.lst_mean_300 ?? 0),
-                Number(props.builtup_pct_300 ?? 0),
-                Number(props.green_ratio_300 ?? 0) * 100,
-              ],
-              itemStyle: { color: "#f97316", borderRadius: [4, 4, 0, 0] },
-            },
-            {
-              name: "รัศมี 500 ม.",
-              type: "bar",
-              data: [
-                Number(props.lst_mean_500 ?? 0),
-                Number(props.builtup_pct_500 ?? 0),
-                Number(props.green_ratio_500 ?? 0) * 100,
-              ],
-              itemStyle: { color: "#0284c7", borderRadius: [4, 4, 0, 0] },
-            },
-          ],
-        });
-      },
-    });
   }
 
   async loadBuildings() {
@@ -1153,7 +880,7 @@ export class MapController {
       src.setData(fc as unknown as GeoJSON.FeatureCollection);
       (this.map.getSource("track-line") as maplibregl.GeoJSONSource).setData(line as unknown as GeoJSON.Feature);
     } else {
-      const vis = this.projectMode === "project2" ? "visible" : "none";
+      const vis = (document.getElementById("track-on") as HTMLInputElement | null)?.checked !== false ? "visible" : "none";
       this.map.addSource("track-line", { type: "geojson", data: line as unknown as GeoJSON.Feature });
       this.map.addSource("track", { type: "geojson", data: fc as unknown as GeoJSON.FeatureCollection });
       this.map.addLayer({
@@ -1249,10 +976,6 @@ export class MapController {
           if (lbl) lbl.textContent = `${devId} · ${ts ? ts.slice(11, 19) : "ปัจจุบัน"}`;
         }
 
-        if (this.liveMarker) {
-          this.liveMarker.getElement().style.display = this.projectMode === "cs341" ? "none" : "";
-        }
-
         if (nowText) nowText.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
         if (nowMeta) {
           nowMeta.textContent = `อัปเดต ${ts || "ล่าสุด"} · อุณหภูมิ ${fmt(r.temp_c_mean ?? r.temp_c, 1)} °C`;
@@ -1273,7 +996,7 @@ export class MapController {
     if (this.liveRefreshTimer === null) {
       this.liveRefreshTimer = window.setInterval(() => {
         const curDev = (document.getElementById("track-dev") as HTMLSelectElement | null)?.value;
-        if (curDev && this.projectMode === "project2") {
+        if (curDev) {
           this.refreshCurrentPosition(curDev);
         }
       }, 10000);
@@ -1300,7 +1023,6 @@ export class MapController {
         const el = document.createElement("div");
         el.className = "pin";
         el.title = d.site_name || d.device_id;
-        if (this.projectMode === "cs341") el.style.display = "none";
         const mk = new maplibregl.Marker({ element: el }).setLngLat([d.fixed_lon!, d.fixed_lat!]).addTo(this.map);
         this.stationMarkers.push(mk);
         el.onclick = (ev) => {
