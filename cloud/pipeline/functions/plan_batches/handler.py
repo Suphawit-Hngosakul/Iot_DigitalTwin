@@ -2,8 +2,12 @@
 
 Scheduled run (EventBridge Scheduler input):
     {"mode": "normal", "scheduled_time": "<aws.scheduler.scheduled-time>"}
-  -> every device in devices.csv x Thai-local hours H-1 .. H-LOOKBACK_HOURS,
-     only the hours that have raw files (H = scheduled hour; falls back to now).
+  -> every batch with a pending marker (raw/_pending/iot/<batch_id>, written by ingest
+     after the raw files; CheckBatch removes it once the files are confirmed processed),
+     however old, plus every device in devices.csv x Thai-local hours
+     H-1 .. H-LOOKBACK_HOURS that have raw files (safety net for a lost marker).
+     Hour H itself is left out (still being written). Oldest hour first, at most
+     MAX_BATCHES per run; the rest stays pending for the next run.
 Manual run:
     {"batch_ids": ["IOTW-A001__2026-11-16__14", ...], "mode": "normal" | "force"}
   -> exactly those, unfiltered (CheckBatch reports bad ids / no data).
@@ -16,7 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import boto3
 
@@ -25,7 +29,9 @@ from common import schema
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
-DEFAULT_LOOKBACK_HOURS = 72  # late uploads (relay backlog, SD resend) are still picked up
+DEFAULT_LOOKBACK_HOURS = 6  # safety net only: late uploads are found by their pending marker
+# keeps one execution well under the Step Functions 25,000-event history limit
+DEFAULT_MAX_BATCHES = 500
 
 _s3 = None
 
@@ -80,6 +86,36 @@ def active_in_hour(d, hour: datetime) -> bool:
         d.valid_to is None or d.valid_to > hour)
 
 
+def pending_batches(s3, bucket: str, h: datetime) -> list[str]:
+    """batch_ids with a pending marker, hours before H only (bad names are skipped)."""
+    out = []
+    for page in s3.get_paginator("list_objects_v2").paginate(
+            Bucket=bucket, Prefix=schema.PENDING_PREFIX):
+        for obj in page.get("Contents", []):
+            batch_id = obj["Key"][len(schema.PENDING_PREFIX):]
+            try:
+                b = schema.parse_batch_id(batch_id)
+            except ValueError:
+                log.warning("ignoring bad pending marker %s", obj["Key"])
+                continue
+            if datetime.combine(b.date, time(b.hour)) < h:
+                out.append(batch_id)
+    return out
+
+
+def _hour_key(batch_id: str):
+    b = schema.parse_batch_id(batch_id)
+    return (b.date, b.hour)
+
+
+def plan_all(s3, bucket: str, devices, h: datetime, n: int,
+             limit: int = DEFAULT_MAX_BATCHES) -> tuple[list[str], int]:
+    """(pending + lookback batch_ids, oldest hour first, at most `limit`; count left over)."""
+    ids = list(dict.fromkeys(plan(s3, bucket, devices, h, n) + pending_batches(s3, bucket, h)))
+    ids.sort(key=_hour_key)       # stable: lookback order kept inside an hour
+    return ids[:limit], max(0, len(ids) - limit)
+
+
 def plan(s3, bucket: str, devices, h: datetime, n: int) -> list[str]:
     """batch_ids with raw data in the lookback window, oldest hour first."""
     # dict.fromkeys: a station that moved inside the hour has 2 registry rows
@@ -107,9 +143,11 @@ def handler(event, context=None):
         source = "manual"
     else:
         n = int(os.environ.get("LOOKBACK_HOURS", DEFAULT_LOOKBACK_HOURS))
+        limit = int(os.environ.get("MAX_BATCHES", DEFAULT_MAX_BATCHES))
         h = scheduled_hour_local(event.get("scheduled_time"))
-        ids = plan(_client(), os.environ["DATA_BUCKET"], schema.load_devices(), h, n)
-        source = f"schedule H={h.isoformat(sep=' ')} lookback={n}"
+        ids, left = plan_all(_client(), os.environ["DATA_BUCKET"], schema.load_devices(),
+                             h, n, limit)
+        source = f"schedule H={h.isoformat(sep=' ')} lookback={n} left_for_next_run={left}"
     log.info(json.dumps({"source": source, "mode": mode, "count": len(ids)}))
     return {
         "mode": mode,

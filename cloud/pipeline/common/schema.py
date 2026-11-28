@@ -438,6 +438,16 @@ def s3_key_raw(device_id: str, d: date | str | None, hour: int | str | None,
     return f"raw/csv/device_id={device_id}/date={d_s}/hour={h_s}/part-{chunk_id}.csv"
 
 
+# Pending marker (plan "pending batches"): an empty object per batch whose raw files changed
+# and that no run has confirmed yet. Under raw/ so the ingest role (PutObject raw/*) can write it.
+PENDING_PREFIX = "raw/_pending/iot/"
+
+
+def s3_key_pending(batch_id: str) -> str:
+    parse_batch_id(batch_id)
+    return PENDING_PREFIX + batch_id
+
+
 def raw_prefix(batch_id: str) -> str:
     """S3 prefix holding every raw chunk of one batch (ends with '/')."""
     b = parse_batch_id(batch_id)

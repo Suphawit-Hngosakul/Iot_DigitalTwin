@@ -27,9 +27,9 @@ variable "schedule_enabled" {
 }
 
 variable "lookback_hours" {
-  description = "Hours before the scheduled hour that each run re-plans (late uploads, e.g. relay backlog / SD resend)"
+  description = "Hours before the scheduled hour that each run re-lists raw/ (safety net; late uploads are found by their pending marker)"
   type        = number
-  default     = 72
+  default     = 6
 }
 
 variable "pandas_layer_arn" {

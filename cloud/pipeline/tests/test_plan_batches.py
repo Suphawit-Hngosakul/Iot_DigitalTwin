@@ -123,3 +123,36 @@ def test_station_moved_inside_hour_is_one_batch(s3):
                    device_type="Stationary"),
                dev("IOTW-S001", valid_from="2026-11-17 14:30:00", device_type="Stationary")]
     assert pb.plan(s3, BUCKET, devices, datetime(2026, 11, 17, 15), 2) == ["IOTW-S001__2026-11-17__14"]
+
+
+# ── pending markers ──────────────────────────────────────────────────────────
+
+def mark(s3, batch_id):
+    s3.put_object(Bucket=BUCKET, Key=schema.s3_key_pending(batch_id), Body=b"")
+
+
+def test_pending_older_than_lookback_is_planned(s3):
+    mark(s3, "IOTW-A001__2026-10-01__09")         # weeks late (e.g. SD resend)
+    put(s3, "IOTW-A001", "2026-11-18", "00")
+    ids, left = pb.plan_all(s3, BUCKET, DEVICES, datetime(2026, 11, 18, 1), 6)
+    assert ids == ["IOTW-A001__2026-10-01__09", "IOTW-A001__2026-11-18__00"] and left == 0
+
+
+def test_pending_and_lookback_same_batch_once(s3):
+    put(s3, "IOTW-A001", "2026-11-18", "00")
+    mark(s3, "IOTW-A001__2026-11-18__00")
+    ids, _ = pb.plan_all(s3, BUCKET, DEVICES, datetime(2026, 11, 18, 1), 6)
+    assert ids == ["IOTW-A001__2026-11-18__00"]
+
+
+def test_pending_current_hour_and_bad_names_skipped(s3):
+    mark(s3, "IOTW-A001__2026-11-18__01")         # = H, still being written
+    s3.put_object(Bucket=BUCKET, Key=schema.PENDING_PREFIX + "junk", Body=b"")
+    assert pb.plan_all(s3, BUCKET, DEVICES, datetime(2026, 11, 18, 1), 6) == ([], 0)
+
+
+def test_max_batches_keeps_oldest_and_reports_rest(s3):
+    for h in range(5):
+        mark(s3, f"IOTW-A001__2026-11-10__{h:02d}")
+    ids, left = pb.plan_all(s3, BUCKET, DEVICES, datetime(2026, 11, 18, 1), 6, limit=3)
+    assert ids == [f"IOTW-A001__2026-11-10__{h:02d}" for h in range(3)] and left == 2

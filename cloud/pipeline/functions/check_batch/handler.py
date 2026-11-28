@@ -14,6 +14,10 @@ status:
   NEW                never published
   CHANGED            published, but files were added/replaced since (e.g. backfill),
                      or mode == force
+
+NO_DATA / ALREADY_PROCESSED / ALREADY_QUARANTINED mean the current raw files need no
+more work, so the batch's pending marker is removed -- only if it is older than this
+listing: a chunk that lands meanwhile writes a newer marker, which is kept.
 """
 
 from __future__ import annotations
@@ -21,8 +25,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 
 import boto3
+from botocore.exceptions import ClientError
 
 from common import batch_manifest, schema
 
@@ -37,6 +43,9 @@ ALREADY_PROCESSED = "ALREADY_PROCESSED"
 ALREADY_QUARANTINED = "ALREADY_QUARANTINED"
 NEW = "NEW"
 CHANGED = "CHANGED"
+DONE = (NO_DATA, ALREADY_PROCESSED, ALREADY_QUARANTINED)
+# S3 LastModified has 1 s resolution; Lambda and S3 clocks may differ a little
+PENDING_MARGIN = timedelta(seconds=5)
 
 _s3 = None
 
@@ -48,7 +57,29 @@ def _client():
     return _s3
 
 
-def check(s3, bucket: str, batch_id, mode) -> dict:
+def check(s3, bucket: str, batch_id, mode, now: datetime | None = None) -> dict:
+    """Decide what to do with one batch, then drop its pending marker if it is done."""
+    listed_at = now or datetime.now(timezone.utc)
+    result = _decide(s3, bucket, batch_id, mode)
+    if result["status"] in DONE:
+        result["pending_cleared"] = clear_pending(s3, bucket, batch_id, listed_at)
+    return result
+
+
+def clear_pending(s3, bucket: str, batch_id: str, listed_at: datetime) -> bool:
+    """Delete the batch's pending marker if it was written before the raw listing."""
+    key = schema.s3_key_pending(batch_id)
+    try:
+        written = s3.head_object(Bucket=bucket, Key=key)["LastModified"]
+    except ClientError:
+        return False
+    if written >= listed_at - PENDING_MARGIN:
+        return False
+    s3.delete_object(Bucket=bucket, Key=key)
+    return True
+
+
+def _decide(s3, bucket: str, batch_id, mode) -> dict:
     """Decide what to do with one batch. Never raises for bad input."""
     if mode not in MODES:
         return {"status": INVALID_INPUT, "reason": f"unknown mode {mode!r}"}
