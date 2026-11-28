@@ -93,7 +93,7 @@ output "satellite_wif_role" {
 }
 
 output "web_url" {
-  description = "Open this in the browser (HTTPS via CloudFront)"
+  description = "Open this in the browser (HTTPS via CloudFront, or HTTP S3 website when web_cdn_enabled = false)"
   value       = module.web.web_url
 }
 

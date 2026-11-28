@@ -200,7 +200,7 @@ variable "analytics_weekly_schedule" {
 }
 
 variable "web_cdn_enabled" {
-  description = "Create the CloudFront distribution of the web. false = web bucket + files only, no web_url (e.g. while AWS has not verified the account for CloudFront yet)"
+  description = "true = web on private S3 + CloudFront (HTTPS). false = public S3 static website over HTTP, live charts via ws:// to the hub (D14 fallback, e.g. while AWS has not verified the account for CloudFront)"
   type        = bool
   default     = true
 }

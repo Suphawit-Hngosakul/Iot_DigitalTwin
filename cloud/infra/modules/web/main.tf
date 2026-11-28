@@ -3,6 +3,8 @@
 # Second origin: the realtime hub on the relay EC2, so the page (https) can open
 # wss://<cloudfront>/live instead of ws://<eip>:8081/live (mixed content is blocked).
 # config.json is written by Terraform; the Vite build in dist_dir is uploaded as is.
+# cdn_enabled = false (D14 fallback, e.g. account not yet verified for CloudFront):
+# public S3 static website over plain HTTP, the page opens ws://<relay>:8081/live directly.
 variable "name_prefix" { type = string }
 
 variable "dist_dir" {
@@ -13,7 +15,7 @@ variable "dist_dir" {
 variable "api_url" { type = string }
 
 variable "hub_origin_domain" {
-  description = "Public DNS name of the relay EC2 (CloudFront needs a name, not an IP). Empty = no /live route."
+  description = "Public DNS name of the relay EC2 (CloudFront needs a name, not an IP). Empty = no live hub URL in config.json."
   type        = string
   default     = ""
 }
@@ -24,7 +26,7 @@ variable "hub_port" {
 }
 
 variable "cdn_enabled" {
-  description = "false = no CloudFront distribution/bucket policy (no web_url, no wss /live)"
+  description = "true = private bucket + CloudFront (HTTPS, wss /live). false = public S3 static website (HTTP, ws:// straight to the hub)"
   type        = bool
   default     = true
 }
@@ -71,7 +73,7 @@ locals {
   dist_files = [for f in try(fileset(var.dist_dir, "**"), []) : f if f != "config.json"]
 }
 
-# ---- bucket (private, only CloudFront reads it) ------------------------------
+# ---- bucket (private + CloudFront, or public website when cdn_enabled = false) --
 
 resource "aws_s3_bucket" "web" {
   bucket        = local.bucket_name
@@ -87,10 +89,21 @@ resource "aws_s3_bucket_ownership_controls" "web" {
 
 resource "aws_s3_bucket_public_access_block" "web" {
   bucket                  = aws_s3_bucket.web.id
-  block_public_acls       = true
-  block_public_policy     = true
+  block_public_acls       = true # ACLs stay off (BucketOwnerEnforced); only the policy grants reads
+  block_public_policy     = var.cdn_enabled
   ignore_public_acls      = true
-  restrict_public_buckets = true
+  restrict_public_buckets = var.cdn_enabled
+}
+
+resource "aws_s3_bucket_website_configuration" "web" {
+  count  = var.cdn_enabled ? 0 : 1
+  bucket = aws_s3_bucket.web.id
+  index_document {
+    suffix = "index.html"
+  }
+  error_document {
+    key = "index.html"
+  }
 }
 
 # ---- CloudFront ---------------------------------------------------------------
@@ -175,7 +188,7 @@ resource "aws_cloudfront_distribution" "web" {
   }
 }
 
-data "aws_iam_policy_document" "web" {
+data "aws_iam_policy_document" "cdn" {
   count = var.cdn_enabled ? 1 : 0
   statement {
     actions   = ["s3:GetObject"]
@@ -192,17 +205,32 @@ data "aws_iam_policy_document" "web" {
   }
 }
 
+# cdn_enabled = false: anyone may read the files (built web + buildings.geojson, D26 allows it).
+data "aws_iam_policy_document" "public" {
+  count = var.cdn_enabled ? 0 : 1
+  statement {
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.web.arn}/*"]
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+  }
+}
+
 resource "aws_s3_bucket_policy" "web" {
-  count      = var.cdn_enabled ? 1 : 0
   bucket     = aws_s3_bucket.web.id
-  policy     = data.aws_iam_policy_document.web[0].json
+  policy     = var.cdn_enabled ? data.aws_iam_policy_document.cdn[0].json : data.aws_iam_policy_document.public[0].json
   depends_on = [aws_s3_bucket_public_access_block.web]
 }
 
 # ---- content ------------------------------------------------------------------
 
 locals {
-  hub_live_url = local.hub_enabled && var.cdn_enabled ? "wss://${aws_cloudfront_distribution.web[0].domain_name}/live" : ""
+  # https page -> wss through CloudFront; http page (no CDN) -> ws:// straight to the hub
+  hub_live_url = !local.hub_enabled ? "" : (var.cdn_enabled
+    ? "wss://${aws_cloudfront_distribution.web[0].domain_name}/live"
+  : "ws://${var.hub_origin_domain}:${var.hub_port}/live")
   web_config = {
     api_url      = var.api_url
     hub_live_url = local.hub_live_url
@@ -236,8 +264,10 @@ resource "aws_s3_object" "config" {
 # ---- outputs ------------------------------------------------------------------
 
 output "web_url" {
-  description = "empty when cdn_enabled = false"
-  value       = var.cdn_enabled ? "https://${aws_cloudfront_distribution.web[0].domain_name}" : ""
+  description = "https://<cloudfront> or, with cdn_enabled = false, http://<bucket>.s3-website-<region>.amazonaws.com"
+  value = (var.cdn_enabled
+    ? "https://${aws_cloudfront_distribution.web[0].domain_name}"
+  : "http://${aws_s3_bucket_website_configuration.web[0].website_endpoint}")
 }
 
 output "hub_live_url" {
