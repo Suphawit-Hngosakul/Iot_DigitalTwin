@@ -76,3 +76,7 @@ analytics_enabled = true
 
 
 // ตัวเลือกอื่นทั้งหมด (CORS, ตั้งเวลา, ค่า GEE, threshold ฯลฯ) มี default ใน variables.tf ไม่ต้องใส่
+
+# CloudFront of the web. false while AWS has not verified the account for CloudFront yet
+# (AccessDenied: Your account must be verified ...); no web_url until it is true again.
+# web_cdn_enabled = false

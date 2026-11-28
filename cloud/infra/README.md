@@ -33,8 +33,7 @@ AWS account ของตัวเอง (D27): region `ap-southeast-2` เท่
 |---|---|---|
 | Terraform >= 1.6 (หรือ OpenTofu) | สร้างทุก resource | `terraform version` |
 | AWS CLI v2 | Terraform เรียกสร้าง bucket + ใช้ตรวจผล | `aws --version` |
-| bash | `local-exec` ของ module `storage` (Windows ใช้ Git Bash) | `bash --version` |
-| Python 3.12 + pip | สร้างโทเค็นอุปกรณ์ + build GEE layer (เฉพาะถ้าเปิดดาวเทียม) | `python --version` |
+| Python 3.12 + pip | `local-exec` สร้าง bucket (module `storage`), สร้างโทเค็นอุปกรณ์ + build GEE layer (เฉพาะถ้าเปิดดาวเทียม) ไม่ต้องมี bash ตั้งชื่อคำสั่งด้วย `python_cmd` | `python --version` |
 | git | clone repo | `git --version` |
 
 เครื่องที่ไม่มีของข้างบน ใช้ **AWS CloudShell** แทนได้ (มี aws, bash, python, git อยู่แล้ว ต้องติดตั้ง Terraform เอง และไม่ต้องตั้ง credentials)
@@ -204,11 +203,12 @@ terraform apply -target=module.catalog -target=module.curated_merge
 | `no space left on device` ตอน apply (CloudShell) | home เต็ม: **อย่าปิดหน้าต่างและอย่า apply ซ้ำ** ลบ `~/.cache/pip`, `cloud/satellite/layer/build/`, `.terraform/` (รัน `bash setup-cloudshell.sh` ดูพื้นที่ที่เหลือได้) แล้วคัดลอก JSON ของ state ที่ Terraform พิมพ์ไว้ในหน้าจอ (ตั้งแต่ `{` แรกถึง `}` สุดท้าย) ลง `errored.tfstate` แล้ว `terraform state push errored.tfstate` จากนั้นตั้ง `TF_DATA_DIR` ตามขั้น 0 แล้ว init + apply ใหม่ ถ้ากู้ state ไม่ได้ ต้อง import resource เข้า state ใหม่ หรือลบ resource ใน console แล้ว apply ใหม่ |
 | `ExpiredToken` / `InvalidClientTokenId` | access key ผิดหรือถูกลบ ทำขั้น 1 ใหม่ |
 | `explicit deny in a service control policy` | ใช้ region ผิด บัญชีนี้ใช้ได้แค่ `ap-southeast-2` เช็ก `aws configure get region` และตัวแปร `region` |
-| apply ล้มตอน `terraform_data.bucket` (`aws: command not found` / `bash`) | เครื่องไม่มี aws หรือ bash ใช้ CloudShell หรือสร้าง bucket เอง `aws s3api create-bucket --bucket <ชื่อ> --region ap-southeast-2 --create-bucket-configuration LocationConstraint=ap-southeast-2` แล้ว apply ซ้ำ (จะข้ามการสร้าง) |
+| apply ล้มตอน `terraform_data.bucket` (`'aws' (AWS CLI) not found` / หา python ไม่เจอ) | เครื่องไม่มี aws หรือ `python_cmd` ผิด ใช้ CloudShell หรือสร้าง bucket เอง `aws s3api create-bucket --bucket <ชื่อ> --region ap-southeast-2 --create-bucket-configuration LocationConstraint=ap-southeast-2` แล้ว apply ซ้ำ (จะข้ามการสร้าง) |
 | `BucketAlreadyExists` | ชื่อ bucket ซ้ำทั่วโลก เปลี่ยน `bucket_name` |
 | `AccessDenied` ที่ `s3:GetBucketObjectLockConfiguration` | เกิดถ้าใช้ resource `aws_s3_bucket` ตรงๆ module `storage` เลี่ยงไว้แล้ว อย่าเปลี่ยนไปใช้ resource นั้น |
 | build layer ล้ม (`python: command not found`, pip ล้มเหลว) | ตั้ง `python_cmd = "python3"` และเช็กว่าออกเน็ตได้ หรือ build เองแล้วตั้ง `gee_layer_zip` |
 | Step Functions / Scheduler รันไม่ขึ้นเพราะสิทธิ์ | ดู role `iot-dt-sfn` / `iot-dt-trigger` ใน module `iam` (trust `states`, `events`, `scheduler`) |
+| `AccessDenied: Your account must be verified before you can add new CloudFront resources` | บัญชีใหม่ยังไม่ผ่านการยืนยันของ CloudFront เปิดเคสที่ AWS Support Center > Create case > Account and billing แล้ววาง error ทั้งข้อความ ระหว่างรอตั้ง `web_cdn_enabled = false` แล้ว apply ส่วนอื่นได้ (ไม่มี `web_url` และ wss `/live`) ได้รับยืนยันแล้วลบบรรทัดนั้นแล้ว apply ใหม่ |
 | budget สร้างไม่ได้ (`AccessDenied` ที่ budgets) | ตั้ง `budget_limit_usd = 0` แล้ว apply ใหม่ ยังมี spend limit ของบัญชีกันอยู่ |
 | `satellite_test` error ตอนแลก token | ฝั่ง Google ยังไม่เพิ่ม AWS account / role ใหม่ หรือ `gee_wif.provider_id` ไม่ตรง (ขั้น 6) |
 | `AlreadyExists` ของตาราง Glue | ตารางเดิมที่สร้างนอก Terraform ลบรายการนั้นใน Glue แล้ว apply ใหม่ |
@@ -222,7 +222,7 @@ terraform apply -target=module.catalog -target=module.curated_merge
 
 ## อ้างอิง
 
-**bucket:** module `storage` สร้าง bucket ด้วย AWS CLI ผ่าน `terraform_data` + `local-exec` (ต้องมี `aws` และ `bash` ในเครื่องที่รัน Windows ใช้ Git Bash) สืบมาจากสมัย Learner Lab ที่ SCP ห้าม `s3:GetBucketObjectLockConfiguration` ซึ่ง resource `aws_s3_bucket` อ่านทุกครั้ง ใช้กับบัญชีใดก็ได้ ถ้ามี bucket อยู่แล้วจะข้ามไป Terraform ตั้งค่าเฉพาะ public access block / ownership / encryption / lifecycle / notification และ `terraform destroy` **ไม่ลบ** bucket กับข้อมูลข้างใน
+**bucket:** module `storage` สร้าง bucket ด้วย AWS CLI ผ่าน `terraform_data` + `local-exec` (สคริปต์ `modules/storage/ensure_bucket.py` ต้องมี `aws` และ `python_cmd` ในเครื่องที่รัน ไม่ต้องมี bash) สืบมาจากสมัย Learner Lab ที่ SCP ห้าม `s3:GetBucketObjectLockConfiguration` ซึ่ง resource `aws_s3_bucket` อ่านทุกครั้ง ใช้กับบัญชีใดก็ได้ ถ้ามี bucket อยู่แล้วจะข้ามไป Terraform ตั้งค่าเฉพาะ public access block / ownership / encryption / lifecycle / notification และ `terraform destroy` **ไม่ลบ** bucket กับข้อมูลข้างใน
 
 **ย้ายไป bucket ใหม่ (เช่นจาก `iot-dt-<account-id>` เป็น `digitaltwin-lake-<account-id>`):** S3 เปลี่ยนชื่อ bucket ไม่ได้ ต้องสร้างใหม่แล้ว copy ข้อมูลไป ส่วนโค้ดอ้างชื่อผ่าน `bucket_name` ตัวเดียว (Lambda env `DATA_BUCKET`, Glue location, EventBridge rule) ยกเว้นตาราง Iceberg `cell_period` ที่เก็บ path เต็มไว้ใน metadata จึงต้องสร้างใหม่ ทำในรอบเดียวกับ D23 ขั้น 4 ได้ เพราะ IoT ต้องรัน force อยู่แล้ว
 1. `aws s3 mb s3://<ใหม่> --region ap-southeast-2` แล้วปิด scheduler ชั่วคราว (`pipeline_schedule_enabled = false`, `satellite_ingest_schedule = ""`, `curated_merge_daily_schedule = ""`) + `terraform apply`

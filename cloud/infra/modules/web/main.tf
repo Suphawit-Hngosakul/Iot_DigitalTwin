@@ -23,6 +23,12 @@ variable "hub_port" {
   default = 8081
 }
 
+variable "cdn_enabled" {
+  description = "false = no CloudFront distribution/bucket policy (no web_url, no wss /live)"
+  type        = bool
+  default     = true
+}
+
 variable "price_class" {
   description = "PriceClass_200 includes edge locations in Asia (Bangkok/Singapore)"
   type        = string
@@ -97,6 +103,7 @@ resource "aws_cloudfront_origin_access_control" "web" {
 }
 
 resource "aws_cloudfront_distribution" "web" {
+  count               = var.cdn_enabled ? 1 : 0
   enabled             = true
   comment             = "${var.name_prefix} web"
   default_root_object = "index.html"
@@ -169,6 +176,7 @@ resource "aws_cloudfront_distribution" "web" {
 }
 
 data "aws_iam_policy_document" "web" {
+  count = var.cdn_enabled ? 1 : 0
   statement {
     actions   = ["s3:GetObject"]
     resources = ["${aws_s3_bucket.web.arn}/*"]
@@ -179,21 +187,22 @@ data "aws_iam_policy_document" "web" {
     condition {
       test     = "StringEquals"
       variable = "AWS:SourceArn"
-      values   = [aws_cloudfront_distribution.web.arn]
+      values   = [aws_cloudfront_distribution.web[0].arn]
     }
   }
 }
 
 resource "aws_s3_bucket_policy" "web" {
+  count      = var.cdn_enabled ? 1 : 0
   bucket     = aws_s3_bucket.web.id
-  policy     = data.aws_iam_policy_document.web.json
+  policy     = data.aws_iam_policy_document.web[0].json
   depends_on = [aws_s3_bucket_public_access_block.web]
 }
 
 # ---- content ------------------------------------------------------------------
 
 locals {
-  hub_live_url = local.hub_enabled ? "wss://${aws_cloudfront_distribution.web.domain_name}/live" : ""
+  hub_live_url = local.hub_enabled && var.cdn_enabled ? "wss://${aws_cloudfront_distribution.web[0].domain_name}/live" : ""
   web_config = {
     api_url      = var.api_url
     hub_live_url = local.hub_live_url
@@ -227,7 +236,8 @@ resource "aws_s3_object" "config" {
 # ---- outputs ------------------------------------------------------------------
 
 output "web_url" {
-  value = "https://${aws_cloudfront_distribution.web.domain_name}"
+  description = "empty when cdn_enabled = false"
+  value       = var.cdn_enabled ? "https://${aws_cloudfront_distribution.web[0].domain_name}" : ""
 }
 
 output "hub_live_url" {
@@ -241,5 +251,5 @@ output "bucket_name" {
 
 output "distribution_id" {
   description = "For aws cloudfront create-invalidation after re-uploading index.html"
-  value       = aws_cloudfront_distribution.web.id
+  value       = var.cdn_enabled ? aws_cloudfront_distribution.web[0].id : ""
 }

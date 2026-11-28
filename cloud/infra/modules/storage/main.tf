@@ -15,32 +15,30 @@ variable "region" {
   default = "ap-southeast-2"
 }
 
+variable "python_cmd" {
+  description = "Python that runs ensure_bucket.py (python on Windows, python3 on most Linux/macOS)"
+  type        = string
+  default     = "python"
+}
+
 variable "cors_allowed_origins" {
   description = "Origins allowed to GET objects with a presigned URL from the browser (layer PNGs of /layers, #34). [] = no CORS rule."
   type        = list(string)
   default     = []
 }
 
-# The bucket is created with the AWS CLI from Terraform (needs `aws` + `bash` on
-# PATH) and Terraform manages only the settings below. Kept from the Learner Lab
+# The bucket is created with the AWS CLI from Terraform (ensure_bucket.py, needs
+# `aws` + python_cmd on PATH, works on Windows/macOS/Linux without bash) and Terraform manages only the settings below. Kept from the Learner Lab
 # days, whose SCP denied s3:GetBucketObjectLockConfiguration that the
 # aws_s3_bucket resource always reads (c3d9ba3); it also works on any account. Idempotent: an existing bucket is left as it is.
 # `terraform destroy` does NOT delete the bucket or its data (delete it by hand).
 resource "terraform_data" "bucket" {
   input = var.bucket_name
 
+  # No shell: runs `python_cmd ensure_bucket.py --region <region> <bucket>` directly.
   provisioner "local-exec" {
-    interpreter = ["bash", "-c"]
-    command     = <<-EOT
-      if aws s3api head-bucket --bucket "${var.bucket_name}" 2>/dev/null; then
-        echo "bucket ${var.bucket_name} exists"
-      elif [ "${var.region}" = "us-east-1" ]; then
-        aws s3api create-bucket --bucket "${var.bucket_name}" --region us-east-1
-      else
-        aws s3api create-bucket --bucket "${var.bucket_name}" --region "${var.region}" \
-          --create-bucket-configuration LocationConstraint="${var.region}"
-      fi
-    EOT
+    interpreter = [var.python_cmd, abspath("${path.module}/ensure_bucket.py"), "--region", var.region]
+    command     = var.bucket_name
   }
 }
 

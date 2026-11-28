@@ -19,6 +19,7 @@ module "storage" {
   source      = "./modules/storage"
   bucket_name = var.bucket_name
   region      = var.region
+  python_cmd  = var.python_cmd
   # S3 -> EventBridge for the satellite pipeline trigger (spec 51 §2)
   eventbridge_enabled = var.satellite_pipeline_enabled
   # web reads layer PNGs via presigned GET (#34) -> same origins as the API
@@ -196,6 +197,7 @@ module "web" {
   api_url           = module.api.api_url
   hub_origin_domain = var.relay_enabled && var.hub_enabled ? module.relay[0].public_dns : ""
   hub_port          = var.relay_enabled ? module.relay[0].hub_port : 8081
+  cdn_enabled       = var.web_cdn_enabled
 }
 
 # Public AWS SDK for pandas layer (pyarrow) of the deploy region (plan R6).

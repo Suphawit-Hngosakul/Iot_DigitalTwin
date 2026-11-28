@@ -116,8 +116,11 @@ resource "terraform_data" "build_layer" {
   count            = local.build_layer ? 1 : 0
   triggers_replace = [local.layer_hash]
 
+  # No shell: Terraform runs [python_cmd, <abs path>] directly, so the path needs
+  # no quoting (cmd.exe on Windows mangled "./../satellite/..." into a bad path).
   provisioner "local-exec" {
-    command = "${var.python_cmd} \"${var.layer_build_script}\""
+    interpreter = [var.python_cmd]
+    command     = abspath(var.layer_build_script)
   }
 }
 

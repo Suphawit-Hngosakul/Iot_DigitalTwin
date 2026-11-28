@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -43,6 +44,15 @@ def tool(name: str) -> str:
     if not path:
         raise SystemExit(f"'{name}' not found on PATH; install it first (see cloud/infra/README.md step 0)")
     return path
+
+
+def tfvar(name: str) -> str | None:
+    """Value of a simple `name = "value"` line in terraform.tfvars (None if not set)."""
+    f = INFRA / "terraform.tfvars"
+    if not f.is_file():
+        return None
+    m = re.search(rf'^\s*{name}\s*=\s*"([^"]*)"', f.read_text(encoding="utf-8"), re.M)
+    return m.group(1) if m else None
 
 
 def run(cmd: list[str], cwd: Path) -> None:
@@ -73,9 +83,11 @@ def main() -> None:
     a = ap.parse_args()
 
     tf = tool("terraform")
-    tool("aws")      # module storage creates the bucket with the AWS CLI
-    if not shutil.which("bash"):
-        print("warning: 'bash' not on PATH; module storage needs it on first apply (Windows: Git Bash)")
+    tool("aws")      # module storage creates the bucket with the AWS CLI (ensure_bucket.py)
+    py = tfvar("python_cmd") or "python"  # local-exec of modules storage + satellite runs it
+    if not shutil.which(py):
+        raise SystemExit(f"python_cmd '{py}' not found on PATH; set python_cmd in terraform.tfvars "
+                         "(python on Windows, python3 on most Linux/macOS)")
     if not (INFRA / "terraform.tfvars").is_file():
         raise SystemExit("cloud/infra/terraform.tfvars is missing: copy terraform.tfvars.example and fill it in")
 

@@ -100,7 +100,7 @@ variable "gee_layer_zip" {
 }
 
 variable "python_cmd" {
-  description = "Python with pip used to build gee-layer.zip on apply (python on Windows, python3 on most Linux/macOS)"
+  description = "Python used on apply: builds gee-layer.zip (needs pip) and creates the data bucket (modules/storage/ensure_bucket.py). python on Windows, python3 on most Linux/macOS"
   type        = string
   default     = "python"
 }
@@ -197,4 +197,10 @@ variable "analytics_weekly_schedule" {
   description = "Weekly Scheduler expression (Asia/Bangkok) for analytics refresh; \"\" = none"
   type        = string
   default     = "cron(0 11 ? * SUN *)"
+}
+
+variable "web_cdn_enabled" {
+  description = "Create the CloudFront distribution of the web. false = web bucket + files only, no web_url (e.g. while AWS has not verified the account for CloudFront yet)"
+  type        = bool
+  default     = true
 }
