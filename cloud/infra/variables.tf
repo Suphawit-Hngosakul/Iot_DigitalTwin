@@ -1,7 +1,7 @@
 variable "region" {
   description = "AWS region of the whole stack (own account, plan R6)"
   type        = string
-  default     = "ap-southeast-1"
+  default     = "ap-southeast-2"
 }
 
 variable "name_prefix" {

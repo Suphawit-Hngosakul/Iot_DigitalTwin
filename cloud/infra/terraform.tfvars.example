@@ -23,11 +23,11 @@ device_token_hashes = {
 // อีเมลรับแจ้งเตือนจาก pipeline (ต้องกดยืนยันในอีเมลที่ SNS ส่งมาครั้งแรก)
 alert_email = "you@example.com"
 
-// region ของทั้งระบบ (default ap-southeast-1)
-// region = "ap-southeast-1"
+// region ของทั้งระบบ (default ap-southeast-2)
+// region = "ap-southeast-2"
 
 // layer สำเร็จรูปของ AWS (มี pyarrow) Terraform ประกอบ ARN จาก region + เวอร์ชันให้เอง
-// เช็กว่าเวอร์ชันมีจริงใน region: aws lambda get-layer-version-by-arn --arn arn:aws:lambda:ap-southeast-1:336392948345:layer:AWSSDKPandas-Python312:<version>
+// เช็กว่าเวอร์ชันมีจริงใน region: aws lambda get-layer-version-by-arn --arn arn:aws:lambda:ap-southeast-2:336392948345:layer:AWSSDKPandas-Python312:<version>
 // ดูเวอร์ชันล่าสุดที่ https://aws-sdk-pandas.readthedocs.io/en/stable/install.html หัวข้อ AWS Lambda Layer
 // pandas_layer_version = 31
 
