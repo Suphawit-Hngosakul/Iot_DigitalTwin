@@ -16,6 +16,7 @@ OTHER_TOKEN = "tok-walk-02-secret"
 DEV = "IOTW-A001"
 OTHER_DEV = "IOTW-A002"
 HEADER = ",".join(CSV_COLUMNS)
+PENDING = "raw/_pending/iot/"
 
 
 def row(rec, dt, dev=DEV, session=12, time_valid=1):
@@ -55,8 +56,17 @@ def s3(monkeypatch):
         yield client
 
 
-def keys(s3):
+def all_keys(s3):
     return sorted(o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET).get("Contents", []))
+
+
+def keys(s3):
+    """Raw data files only (pending markers are checked by their own tests)."""
+    return [k for k in all_keys(s3) if not k.startswith(PENDING)]
+
+
+def pending(s3):
+    return [k[len(PENDING):] for k in all_keys(s3) if k.startswith(PENDING)]
 
 
 def body_of(s3, key):
@@ -224,3 +234,23 @@ def test_s3_failure_returns_503(s3, monkeypatch):
     monkeypatch.setenv("DATA_BUCKET", "bucket-that-does-not-exist")
     r = handler.handler(event(csv_body(row(1, "2026-11-16 08:30:00")), chunk="12-1-1"))
     assert r["statusCode"] == 503
+
+
+# ── pending markers (plan: pending batches) ──────────────────────────────────
+
+def test_pending_marker_per_dated_hour(s3):
+    body = csv_body(row(1, "2026-11-16 08:59:59"), row(2, "2026-11-16 09:00:00"))
+    assert handler.handler(event(body, chunk="12-1-2"))["statusCode"] == 200
+    assert pending(s3) == [f"{DEV}__2026-11-16__08", f"{DEV}__2026-11-16__09"]
+
+
+def test_no_pending_marker_for_unknown_time(s3):
+    body = csv_body(row(1, "12345", time_valid=0))
+    assert handler.handler(event(body, chunk="12-1-1"))["statusCode"] == 200
+    assert pending(s3) == []
+
+
+def test_rejected_chunk_writes_no_marker(s3):
+    body = csv_body(row(1, "2026-11-16 08:30:00", dev=OTHER_DEV))
+    assert handler.handler(event(body, chunk="12-1-1"))["statusCode"] == 403
+    assert all_keys(s3) == []

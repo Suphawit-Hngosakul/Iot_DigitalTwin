@@ -35,7 +35,10 @@ from common.schema import (
     CHUNK_ID_RE,
     CSV_COLUMNS,
     check_header,
+    UNKNOWN,
+    make_batch_id,
     raw_partition,
+    s3_key_pending,
     s3_key_raw,
 )
 
@@ -205,6 +208,11 @@ def handler(event, context=None):
                 Metadata={"chunk-id": chunk_id, "rows": str(len(group))},
             )
             written.append(key)
+        # after the data: a marker that is newer than the files it announces
+        for d, h in groups:
+            if d != UNKNOWN and h != UNKNOWN:
+                _client().put_object(Bucket=bucket, Body=b"",
+                                     Key=s3_key_pending(make_batch_id(device_id, d, int(h))))
     except (ClientError, BotoCoreError) as e:
         log.exception("S3 write failed")
         return _err(503, "storage unavailable, retry later",

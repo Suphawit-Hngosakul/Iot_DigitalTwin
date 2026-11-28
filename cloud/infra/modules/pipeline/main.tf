@@ -38,8 +38,9 @@ variable "schedule_enabled" {
 }
 
 variable "lookback_hours" {
-  type    = number
-  default = 24
+  description = "Hours before the scheduled hour that each run re-lists raw/ (safety net; late uploads are found by their pending marker)"
+  type        = number
+  default     = 6
 }
 
 variable "pandas_layer_arn" {

@@ -449,3 +449,16 @@ def test_openapi_matches_routes():
     assert set(spec["paths"]) == set(handler.ROUTES) | {"/grid/{cell_id}"}
     for path, ops in spec["paths"].items():
         assert set(ops) == {"get"}, path
+
+
+def test_station_diurnal_sql_limits_to_period_range():
+    sql = handler._station_diurnal_sql("month_2026-03", "all", "air_temp")
+    assert "date BETWEEN '2026-03-01' AND '2026-03-31'" in sql
+    assert "GROUP BY device_id, HOUR(minute_local)" in sql
+
+
+def test_station_diurnal_sql_window_differs_from_all():
+    all_sql = handler._station_diurnal_sql("scene_2025-04-10", "all", "air_temp")
+    win_sql = handler._station_diurnal_sql("scene_2025-04-10", "window", "air_temp")
+    assert "date BETWEEN" in all_sql and "date BETWEEN" in win_sql
+    assert win_sql != all_sql

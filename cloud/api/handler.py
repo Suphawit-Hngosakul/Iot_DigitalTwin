@@ -563,16 +563,24 @@ ANALYTICS_METRICS = (
 )
 
 
+def _station_diurnal_sql(period: str, match: str, temp_col: str) -> str:
+    """Hourly mean per device over the period's IoT range (same match rules as cell_period)."""
+    mp = curated.parse_merge_period(period)
+    stationary = sorted({d.device_id for d in schema.load_devices() if d.device_type == "Stationary"})
+    where = curated.iot_predicate(mp, match, stationary)
+    return (
+        f"SELECT device_id, HOUR(minute_local) AS hr, AVG({temp_col}) AS val "
+        f"FROM readings_1min WHERE {where} GROUP BY device_id, HOUR(minute_local)"
+    )
+
+
 def _station_diurnal(period: str, match: str) -> dict:
-    """Aggregate hourly air temperature per IoT station from readings_1min."""
+    """Aggregate hourly air temperature per IoT station from readings_1min of the period."""
     devs = _devices()
     temp_col = next((c for c, _ in schema.READINGS_1MIN if "temp" in c), None)
     by_dev: dict[str, dict[int, float]] = {d_id: {} for d_id in devs}
     if temp_col:
-        sql = (
-            f"SELECT device_id, HOUR(minute_local) AS hr, AVG({temp_col}) AS val "
-            "FROM readings_1min GROUP BY device_id, HOUR(minute_local)"
-        )
+        sql = _station_diurnal_sql(period, match, temp_col)
         try:
             _, rows = run_query(sql)
             for dev_id, hr, val in rows:

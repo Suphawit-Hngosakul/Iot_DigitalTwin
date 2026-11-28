@@ -10,6 +10,7 @@ def _load_function(name):
     spec.loader.exec_module(module)
     return module
 import json
+from datetime import datetime, timedelta, timezone
 
 import boto3
 import pytest
@@ -154,3 +155,46 @@ def test_hash_ignores_order_and_size():
 def test_input_fields_pass_through(s3):
     out = run({"batch_id": BATCH, "mode": "normal", "extra": 1})
     assert out["extra"] == 1
+
+
+# ── pending marker ───────────────────────────────────────────────────────────
+
+def put_marker(s3, batch_id=BATCH):
+    s3.put_object(Bucket=BUCKET, Key=schema.s3_key_pending(batch_id), Body=b"")
+
+
+def marker_exists(s3, batch_id=BATCH):
+    return "Contents" in s3.list_objects_v2(Bucket=BUCKET, Prefix=schema.s3_key_pending(batch_id))
+
+
+LATER = datetime.now(timezone.utc) + timedelta(minutes=10)
+
+
+def test_done_batch_clears_old_marker(s3):
+    put_chunk(s3, "12-1-4")
+    put_marker(s3)
+    publish(s3, BATCH, cb.check(s3, BUCKET, BATCH, "normal", now=LATER)["manifest_hash"])
+    assert marker_exists(s3)                       # NEW: still to be processed
+    out = cb.check(s3, BUCKET, BATCH, "normal", now=LATER)
+    assert out["status"] == cb.ALREADY_PROCESSED and out["pending_cleared"] is True
+    assert not marker_exists(s3)
+
+
+def test_no_data_clears_marker(s3):
+    put_marker(s3)
+    out = cb.check(s3, BUCKET, BATCH, "normal", now=LATER)
+    assert out["status"] == cb.NO_DATA and out["pending_cleared"] is True
+
+
+def test_marker_newer_than_listing_is_kept(s3):
+    """A chunk that lands while CheckBatch runs writes a fresh marker -> keep it."""
+    put_chunk(s3, "12-1-4")
+    publish(s3, BATCH, cb.check(s3, BUCKET, BATCH, "normal")["manifest_hash"])
+    put_marker(s3)
+    out = cb.check(s3, BUCKET, BATCH, "normal", now=datetime.now(timezone.utc))
+    assert out["status"] == cb.ALREADY_PROCESSED and out["pending_cleared"] is False
+    assert marker_exists(s3)
+
+
+def test_missing_marker_is_fine(s3):
+    assert cb.check(s3, BUCKET, BATCH, "normal")["pending_cleared"] is False
