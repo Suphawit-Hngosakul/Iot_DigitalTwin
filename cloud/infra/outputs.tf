@@ -81,3 +81,8 @@ output "analytics_state_machine_arn" {
   description = "Heat analytics (#33); start by hand with {\"periods\": [\"season_2025_03-05\"], \"mode\": \"force\"} or {}. null when analytics_enabled = false"
   value       = one(module.analytics[*].state_machine_arn)
 }
+
+output "satellite_wif_role" {
+  description = "Send to the GEE project owner: grant roles/iam.workloadIdentityUser to principalSet .../attribute.aws_role/<this>"
+  value       = "arn:aws:sts::${data.aws_caller_identity.current.account_id}:assumed-role/${module.iam.satellite_role_name}"
+}
