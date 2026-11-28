@@ -18,7 +18,7 @@ output "hub_device_url" {
 }
 
 output "hub_live_url" {
-  description = "For live.html / the web: <this>?device=all"
+  description = "Direct ws:// to the hub (live.html / debugging). The web uses web_hub_live_url (wss via CloudFront)."
   value       = var.relay_enabled ? module.relay[0].hub_live_url : null
 }
 
@@ -85,4 +85,23 @@ output "analytics_state_machine_arn" {
 output "satellite_wif_role" {
   description = "Send to the GEE project owner: grant roles/iam.workloadIdentityUser to principalSet .../attribute.aws_role/<this>"
   value       = "arn:aws:sts::${data.aws_caller_identity.current.account_id}:assumed-role/${module.iam.satellite_role_name}"
+}
+
+output "web_url" {
+  description = "Open this in the browser (HTTPS via CloudFront)"
+  value       = module.web.web_url
+}
+
+output "web_hub_live_url" {
+  description = "wss URL written to config.json"
+  value       = module.web.hub_live_url
+}
+
+output "web_bucket" {
+  value = module.web.bucket_name
+}
+
+output "web_distribution_id" {
+  description = "aws cloudfront create-invalidation --distribution-id <this> --paths \"/index.html\""
+  value       = module.web.distribution_id
 }

@@ -176,3 +176,12 @@ output "hub_live_url" {
   description = "Web / live.html: ws://.../live?device=all"
   value       = var.hub_enabled ? "ws://${aws_eip.relay.public_ip}:${var.hub_port}/live" : null
 }
+
+output "public_dns" {
+  description = "EIP public DNS name (CloudFront origin for the hub, plan R4)"
+  value       = aws_eip.relay.public_dns
+}
+
+output "hub_port" {
+  value = var.hub_port
+}
