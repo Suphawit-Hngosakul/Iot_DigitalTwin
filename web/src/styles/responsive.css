@@ -1,0 +1,40 @@
+/* จอแคบ (≤ 960px) */
+
+@media (max-width: 960px) {
+  #tab-map.active {
+    flex-direction: column;
+  }
+
+  .panel {
+    width: 100%;
+    max-height: 44%;
+  }
+
+  .detail-drawer {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 340px;
+  }
+
+  .grid-iot {
+    grid-template-columns: 1fr;
+  }
+
+  .span2 {
+    grid-column: auto;
+  }
+
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
+
+  .sim-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .globals {
+    margin-left: 0;
+  }
+}

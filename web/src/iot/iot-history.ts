@@ -1,24 +1,11 @@
 import * as echarts from "echarts";
-import { api, toMinuteObjects } from "./api";
-import type { DeviceInfo, QualityResponse, ReadingMinuteRow, ReadingsResponse } from "./types";
+import { api, errMsg, toMinuteObjects } from "../api";
+import { dayOf, fmtNum as fmt, nextDay, statsOf } from "../utils/format";
+import { byId, esc } from "../utils/html";
+import type { DeviceInfo, QualityResponse, ReadingMinuteRow, ReadingsResponse } from "../types";
 
-const fmt = (v: unknown, d = 1) => (v == null || Number.isNaN(Number(v)) ? "—" : Number(v).toFixed(d));
-const dayOf = (s?: string | null) => (s || "").slice(0, 10);
-const nextDay = (day: string) => new Date(Date.parse(day + "T00:00:00Z") + 86400000).toISOString().slice(0, 10);
-const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
-
-function statsOf(vals: (number | null | undefined)[]) {
-  const clean = vals.filter((v): v is number => typeof v === "number" && !Number.isNaN(v));
-  if (!clean.length) return { avg: null, min: null, max: null };
-  const sum = clean.reduce((a, b) => a + b, 0);
-  return {
-    avg: sum / clean.length,
-    min: Math.min(...clean),
-    max: Math.max(...clean),
-  };
-}
-
-export class IotController {
+/** แท็บ IoT › ข้อมูลย้อนหลัง: กราฟเวลาจาก /readings, ความสมบูรณ์ข้อมูลจาก /quality และดาวน์โหลด CSV */
+export class IotHistoryController {
   private charts: Record<string, echarts.ECharts> = {};
   private devices: DeviceInfo[] | null = null;
   private lastKey: string | null = null;
@@ -29,7 +16,7 @@ export class IotController {
   }
 
   private chart(id: string) {
-    return (this.charts[id] ||= echarts.init(document.getElementById(id)!));
+    return (this.charts[id] ||= echarts.init(byId(id)));
   }
 
   resize() {
@@ -37,12 +24,12 @@ export class IotController {
   }
 
   private bindUi() {
-    const devSel = document.getElementById("iot-dev") as HTMLSelectElement;
-    const dateIn = document.getElementById("iot-date") as HTMLInputElement;
-    const winSel = document.getElementById("iot-window") as HTMLSelectElement;
-    const intSel = document.getElementById("iot-interval") as HTMLSelectElement;
-    const dbaIn = document.getElementById("iot-dba") as HTMLInputElement;
-    const exportBtn = document.getElementById("iot-export") as HTMLButtonElement;
+    const devSel = byId<HTMLSelectElement>("iot-dev");
+    const dateIn = byId<HTMLInputElement>("iot-date");
+    const winSel = byId<HTMLSelectElement>("iot-window");
+    const intSel = byId<HTMLSelectElement>("iot-interval");
+    const dbaIn = byId<HTMLInputElement>("iot-dba");
+    const exportBtn = byId<HTMLButtonElement>("iot-export");
 
     devSel.onchange = () => {
       const d = this.devices?.find((x) => x.device_id === devSel.value);
@@ -63,10 +50,7 @@ export class IotController {
     exportBtn.onclick = () => {
       if (!this.lastRows.length) return;
       const cols = Object.keys(this.lastRows[0]);
-      const csv = [
-        cols.join(","),
-        ...this.lastRows.map((r) => cols.map((c) => JSON.stringify(r[c] ?? "")).join(",")),
-      ].join("\n");
+      const csv = [cols.join(","), ...this.lastRows.map((r) => cols.map((c) => JSON.stringify(r[c] ?? "")).join(","))].join("\n");
       const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
@@ -87,19 +71,22 @@ export class IotController {
       try {
         this.devices = (await api<{ devices: DeviceInfo[] }>("/devices")).devices;
       } catch (e: unknown) {
-        document.getElementById("c-spl")!.innerHTML = `<p class="err">${esc(e instanceof Error ? e.message : String(e))}</p>`;
+        byId("c-spl").innerHTML = `<p class="err">${esc(errMsg(e))}</p>`;
         return;
       }
     }
 
-    const sel = document.getElementById("iot-dev") as HTMLSelectElement;
-    const dateIn = document.getElementById("iot-date") as HTMLInputElement;
-    const winSel = document.getElementById("iot-window") as HTMLSelectElement;
-    const intSel = document.getElementById("iot-interval") as HTMLSelectElement;
+    const sel = byId<HTMLSelectElement>("iot-dev");
+    const dateIn = byId<HTMLInputElement>("iot-date");
+    const winSel = byId<HTMLSelectElement>("iot-window");
+    const intSel = byId<HTMLSelectElement>("iot-interval");
 
     if (!sel.options.length) {
       sel.innerHTML = this.devices
-        .map((d) => `<option value="${esc(d.device_id)}">${esc(d.device_id)} (${esc(d.device_type)}${d.site_name ? " · " + esc(d.site_name) : ""})</option>`)
+        .map(
+          (d) =>
+            `<option value="${esc(d.device_id)}">${esc(d.device_id)} (${esc(d.device_type)}${d.site_name ? " · " + esc(d.site_name) : ""})</option>`,
+        )
         .join("");
       const first = this.devices.find((d) => d.latest_hour_local) || this.devices[0];
       if (first) {
@@ -112,7 +99,7 @@ export class IotController {
     const day = dateIn.value;
     const win = winSel.value;
     const interval = intSel.value as "1min" | "1s";
-    const showDba = (document.getElementById("iot-dba") as HTMLInputElement).checked;
+    const showDba = byId<HTMLInputElement>("iot-dba").checked;
     const key = `${dev}|${day}|${win}|${interval}|${showDba}`;
     if (!force && key === this.lastKey) return;
     this.lastKey = key;
@@ -154,7 +141,7 @@ export class IotController {
     const sStat = statsOf(splMean);
     const lStat = statsOf(luxs);
 
-    document.getElementById("iot-kpis")!.innerHTML = `
+    byId("iot-kpis").innerHTML = `
       <div class="kpi"><div class="l">อุณหภูมิอากาศเฉลี่ย</div><div class="v">${fmt(tStat.avg, 1)} °C</div><div class="l">ต่ำสุด ${fmt(tStat.min, 1)} · สูงสุด ${fmt(tStat.max, 1)} °C</div></div>
       <div class="kpi"><div class="l">ความชื้นสัมพัทธ์เฉลี่ย</div><div class="v">${fmt(hStat.avg, 1)} %</div><div class="l">ต่ำสุด ${fmt(hStat.min, 1)} · สูงสุด ${fmt(hStat.max, 1)} %</div></div>
       <div class="kpi"><div class="l">ระดับเสียงเฉลี่ย</div><div class="v">${fmt(sStat.avg, 1)} dB</div><div class="l">ต่ำสุด ${fmt(sStat.min, 1)} · สูงสุด ${fmt(sStat.max, 1)} dB</div></div>
@@ -187,7 +174,7 @@ export class IotController {
           areaStyle: { color: "rgba(15,118,110,.15)" },
           showSymbol: false,
           tooltip: { show: false },
-        }
+        },
       );
     }
     splSeries.push({ name: "เสียงเฉลี่ย dB(SPL)", type: "line", data: splMean, showSymbol: false, lineStyle: { color: "#0f766e", width: 2 } });
@@ -195,21 +182,24 @@ export class IotController {
       splSeries.push({ name: "เสียง dBA", type: "line", data: dbaMean, showSymbol: false, lineStyle: { color: "#f59e0b", width: 1.8 } });
     }
 
-    this.chart("c-spl").setOption(
-      { ...base("dB"), legend: { top: 0, data: ["เสียงเฉลี่ย dB(SPL)", "เสียง dBA"] }, series: splSeries },
-      true
-    );
+    this.chart("c-spl").setOption({ ...base("dB"), legend: { top: 0, data: ["เสียงเฉลี่ย dB(SPL)", "เสียง dBA"] }, series: splSeries }, true);
     this.chart("c-temp").setOption(
-      { ...base("°C"), series: [{ name: "อุณหภูมิ", type: "line", data: temps, showSymbol: false, lineStyle: { color: "#dc2626", width: 2 } }] },
-      true
+      {
+        ...base("°C"),
+        series: [{ name: "อุณหภูมิ", type: "line", data: temps, showSymbol: false, lineStyle: { color: "#dc2626", width: 2 } }],
+      },
+      true,
     );
     this.chart("c-hum").setOption(
-      { ...base("%"), series: [{ name: "ความชื้น", type: "line", data: hums, showSymbol: false, lineStyle: { color: "#2563eb", width: 2 } }] },
-      true
+      {
+        ...base("%"),
+        series: [{ name: "ความชื้น", type: "line", data: hums, showSymbol: false, lineStyle: { color: "#2563eb", width: 2 } }],
+      },
+      true,
     );
     this.chart("c-lux").setOption(
       { ...base("lux"), series: [{ name: "แสง", type: "line", data: luxs, showSymbol: false, lineStyle: { color: "#eab308", width: 2 } }] },
-      true
+      true,
     );
 
     this.chart("c-quality").setOption(
@@ -233,7 +223,7 @@ export class IotController {
           },
         ],
       },
-      true
+      true,
     );
   }
 }

@@ -1,18 +1,14 @@
-import { api } from "./api";
-import type {
-  AnalyticsCorrelation,
-  AnalyticsGroups,
-  AnalyticsRegression,
-  AnalyticsSpatialAutocorr,
-  AnalyticsSummary,
-} from "./types";
-
-const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+import { api, errMsg } from "../api";
+import { byId, esc } from "../utils/html";
+import type { AnalyticsCorrelation, AnalyticsGroups, AnalyticsRegression, AnalyticsSpatialAutocorr, AnalyticsSummary } from "../types";
 
 export class ResearchController {
   private lastKey: string | null = null;
 
-  constructor(private getPeriod: () => string | null, private getMatch: () => "all" | "window") {}
+  constructor(
+    private getPeriod: () => string | null,
+    private getMatch: () => "all" | "window",
+  ) {}
 
   invalidate() {
     this.lastKey = null;
@@ -25,9 +21,9 @@ export class ResearchController {
     if (!force && key === this.lastKey) return;
     this.lastKey = key;
 
-    document.getElementById("res-period-label")!.textContent = `${period || "ล่าสุด"} · โหมด ${match}`;
-    const tbody = document.getElementById("res-comparison-body")!;
-    const interpBox = document.getElementById("res-interpretation")!;
+    byId("res-period-label").textContent = `${period || "ล่าสุด"} · โหมด ${match}`;
+    const tbody = byId("res-comparison-body");
+    const interpBox = byId("res-interpretation");
 
     try {
       const q = { period, match };
@@ -96,7 +92,7 @@ export class ResearchController {
           <td class="ours-cell">${r.ours}</td>
           <td>${r.lit}</td>
           <td>${esc(r.meaning)}</td>
-        </tr>`
+        </tr>`,
         )
         .join("");
 
@@ -130,25 +126,25 @@ export class ResearchController {
       `;
 
       const updateSim = () => {
-        const dNdvi = parseFloat((document.getElementById("sim-ndvi") as HTMLInputElement).value);
-        const dBuilt = -parseFloat((document.getElementById("sim-bldg") as HTMLInputElement).value);
-        document.getElementById("sim-ndvi-lbl")!.textContent = `+${dNdvi.toFixed(2)}`;
-        document.getElementById("sim-bldg-lbl")!.textContent = `${dBuilt}%`;
+        const dNdvi = parseFloat(byId<HTMLInputElement>("sim-ndvi").value);
+        const dBuilt = -parseFloat(byId<HTMLInputElement>("sim-bldg").value);
+        byId("sim-ndvi-lbl").textContent = `+${dNdvi.toFixed(2)}`;
+        byId("sim-bldg-lbl").textContent = `${dBuilt}%`;
 
         const dLst = betaNdvi * dNdvi + betaBuiltup * dBuilt;
         const dAir = dLst * Math.max(0.15, betaAirLst);
-        document.getElementById("sim-result")!.innerHTML = `
+        byId("sim-result").innerHTML = `
           <div><span>อุณหภูมิพื้นผิวคาดการณ์ (LST)</span><b class="cool">${(lstMean + dLst).toFixed(2)} °C (${dLst.toFixed(2)} °C)</b></div>
           <div><span>อุณหภูมิอากาศทางเดินเท้าคาดการณ์ (IoT)</span><b class="cool">${(airMean + dAir).toFixed(2)} °C (${dAir.toFixed(2)} °C)</b></div>
         `;
       };
-      (document.getElementById("sim-ndvi") as HTMLInputElement).oninput = updateSim;
-      (document.getElementById("sim-bldg") as HTMLInputElement).oninput = updateSim;
+      byId<HTMLInputElement>("sim-ndvi").oninput = updateSim;
+      byId<HTMLInputElement>("sim-bldg").oninput = updateSim;
       updateSim();
 
       interpBox.innerHTML = `<strong>ข้อสรุปสำหรับนำไปอภิปรายผลในเล่มโครงงาน:</strong> จากข้อมูลช่วง <code>${esc(period || "")}</code> พบว่าสัณฐานอาคารจาก <code>building.shp</code> และพื้นที่สีเขียว <code>NDVI</code> สามารถอธิบายความแตกต่างของอุณหภูมิพื้นผิวในชุมชนได้ <b>${s3?.r2 != null ? (s3.r2 * 100).toFixed(1) + "%" : "—"}</b> โดยมีส่วนต่างอุณหภูมิระหว่างโซนอาคารหนาแน่นกับโซนสีเขียว <b>${grp.diff_dense_minus_green.toFixed(2)} °C</b> และเมื่อเทียบกับค่าตรวจวัดระดับคนเดินเท้าจากเซนเซอร์ IoT จะเห็นความเชื่อมโยงระหว่างความร้อนพื้นผิวกับสภาวะน่าสบายในแต่ละซอยของชุมชนได้อย่างชัดเจน`;
     } catch (e: unknown) {
-      tbody.innerHTML = `<tr><td colspan="5" class="err">${esc(e instanceof Error ? e.message : String(e))}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="err">${esc(errMsg(e))}</td></tr>`;
     }
   }
 }

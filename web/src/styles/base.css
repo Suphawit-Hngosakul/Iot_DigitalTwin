@@ -1,0 +1,217 @@
+/* ตัวแปรสี, reset, header, แท็บหลัก */
+
+:root {
+  --bg: #f1f5f9;
+  --card: #ffffff;
+  --ink: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --accent: #0d9488;
+  --accent-dark: #0f766e;
+  --accent-soft: #f0fdfa;
+  --amber: #d97706;
+  --coral: #ea580c;
+  --indigo: #4f46e5;
+  --sky: #0284c7;
+  font-family:
+    "Sarabun",
+    "Noto Sans Thai",
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 14px;
+}
+
+code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+  background: #f1f5f9;
+  color: #334155;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+small {
+  color: var(--muted);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Custom Subtle Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Header & Navigation */
+header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 18px;
+  background: linear-gradient(90deg, #ffffff 0%, #f8fafc 100%);
+  border-top: 3px solid var(--accent);
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-badge {
+  background: linear-gradient(135deg, #0d9488, #0284c7);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  letter-spacing: 0.5px;
+}
+
+.brand strong {
+  display: block;
+  font-size: 15px;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.brand-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Main Tabs */
+nav#tabs {
+  display: flex;
+  gap: 6px;
+}
+
+nav#tabs button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #475569;
+  padding: 6px 13px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+nav#tabs button:hover {
+  background: #f1f5f9;
+  color: var(--ink);
+}
+
+nav#tabs button.active {
+  background: linear-gradient(135deg, #0d9488, #0f766e);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(13, 148, 136, 0.28);
+}
+
+.globals {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+  color: #334155;
+  font-weight: 600;
+}
+
+select,
+input[type="date"] {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 5px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--ink);
+  min-width: 0;
+}
+
+select:focus,
+input:focus {
+  outline: 2px solid rgba(13, 148, 136, 0.25);
+  border-color: var(--accent);
+}
+
+main {
+  height: calc(100% - 58px);
+}
+
+.tab {
+  display: none;
+  height: 100%;
+}
+
+.tab.active {
+  display: block;
+}
+
+#tab-map.active {
+  display: flex;
+}
+
+.note {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 2px 0 0;
+  line-height: 1.45;
+}
+
+.err {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+/* ป้ายบนหัวเว็บเมื่อยังไม่ได้ตั้งค่า api_url */
+.config-badge {
+  padding: 4px 10px;
+  border: 1px solid #fca5a5;
+  border-radius: 999px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: help;
+}
