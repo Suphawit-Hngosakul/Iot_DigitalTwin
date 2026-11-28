@@ -7,6 +7,11 @@ output "ingest_url" {
   value       = module.ingest.ingest_url
 }
 
+output "relay_instance_id" {
+  description = "Relay/hub logs without SSH: aws ssm start-session --target <this>"
+  value       = var.relay_enabled ? module.relay[0].instance_id : null
+}
+
 output "relay_url" {
   description = "Put in the firmware as INGEST_URL (plain HTTP, see cloud/relay)"
   value       = var.relay_enabled ? module.relay[0].relay_url : null

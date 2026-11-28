@@ -36,7 +36,7 @@ python fake_device.py ws://127.0.0.1:8081/device tok-a --device IOTW-A001
 # บน AWS
 curl http://<eip>:8081/healthz
 python fake_device.py ws://<eip>:8081/device <token ของ IOTW-A001>
-sudo journalctl -u iot-dt-hub -f      # ต้องเปิด relay_ssh_cidrs ก่อน (ดู cloud/relay/README.md)
+sudo journalctl -u iot-dt-hub -f      # เข้า EC2 ผ่าน SSM: aws ssm start-session --target <relay_instance_id>
 ```
 
 **เว็บ HTTPS ทีหลัง (#44):** หน้า HTTPS ต่อ `ws://` ไม่ได้ (mixed content) → ใส่ Caddy + โดเมน (DuckDNS) หน้า `/live` เป็น `wss://` ส่วนบอร์ดยังใช้ `ws://` ที่ 8081

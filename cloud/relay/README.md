@@ -18,7 +18,8 @@ ESP32 --HTTP :8080--> EC2 relay.py --HTTPS--> API Gateway POST /ingest --> Lambd
 curl http://<relay-ip>:8080/health
 curl -i -X POST http://<relay-ip>:8080/ingest -H "Authorization: Bearer $TOKEN" \
   -H "X-Device-Id: IOTW-A001" -H "X-Chunk-Id: 1-1-1" -H "Content-Type: text/csv" --data-binary @chunk.csv
-sudo journalctl -u iot-dt-relay -f      # บน EC2: ตั้ง relay_ssh_cidrs = ["18.206.107.24/29"] ใน tfvars ก่อน แล้วใช้ EC2 Instance Connect ในหน้า console
+aws ssm start-session --target <relay_instance_id>   # ไม่มี SSH (R5): เข้าผ่าน Session Manager (หรือ console EC2 > Connect > Session Manager)
+sudo journalctl -u iot-dt-relay -f      # บน EC2
 ```
 
 รันในเครื่อง: `UPSTREAM_URL=https://xxxx.execute-api.ap-southeast-2.amazonaws.com/ingest python3 relay.py`

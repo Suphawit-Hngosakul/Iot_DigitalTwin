@@ -138,6 +138,21 @@ bash healthcheck.sh            # เพิ่ม --no-gee ถ้าไม่อ�
 
 บัญชีใหม่เริ่มจากข้อมูลว่าง IoT จะมีข้อมูลหลังบอร์ดอัปโหลดรอบแรก ถ้าบอร์ดเก็บข้อมูลค้างใน SD จะ backfill ให้เองตอนส่ง
 
+
+
+**เติมข้อมูลย้อนหลังทีเดียว (R8):** หลัง apply ครบทุกขั้น (รวมดาวเทียม) รัน
+
+```bash
+python cloud/infra/post_apply.py --all --dry-run   # ดูก่อนว่าจะทำอะไร
+python cloud/infra/post_apply.py --all --iot-files iot/tools/raw/tu_20261120/*.csv
+```
+
+1. `iot` ส่ง log เก่าใน `iot/tools/converted/` (+ `--iot-files` ที่อยู่ใน schema ปัจจุบันแล้ว) ผ่าน ingest ทีละ 300 แถว ingest เขียน pending marker ต่อชั่วโมง แล้วสคริปต์สั่ง pipeline หนึ่งรอบที่หยิบทุกชั่วโมงที่ค้าง token อ่านจาก `IOT_DEVICE_TOKEN` หรือถามตอนรัน (ไม่แสดงบนจอ)
+2. `satellite` ดึง Landsat ทีละเดือน (Lambda 900 s): ทุกเดือนตั้งแต่ `--since` (default 2025-01-01) + เฉพาะเดือนหน้าร้อนของปีตั้งแต่ `--season-from` (default 2024) ให้ได้ composite ของปีนั้นด้วย แล้วคำนวณอาคาร satellite pipeline เริ่มเองต่อ batch สคริปต์รอจนไม่มีตัวไหนรัน ระหว่างนี้ปิด trigger ของ curated-merge กับ analytics ไว้ (merge ครั้งเดียวแทนครั้งละฉาก) และเปิดคืนเสมอตอนจบ
+3. `merge` สั่ง curated-merge หนึ่งรอบ (ทุก period ที่ stale) แล้ว analytics
+
+รันซ้ำได้ ส่วนที่ทำแล้วจะถูกข้าม เลือกทำบางขั้นได้ เช่น `python cloud/infra/post_apply.py satellite merge --since 2025-01-01`
+
 ### ขั้น 6: ดาวเทียม A (ดึง Landsat จาก GEE)
 
 **ทำก่อน (นอก AWS):** ฝั่ง Google ต้องให้ AWS account ใหม่เข้ามาได้ เพราะ Lambda ยืนยันตัวกับ GEE ด้วย WIF ของ project ที่เป็นของ Get ต้องขอให้เจ้าของ project:
