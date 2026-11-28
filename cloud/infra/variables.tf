@@ -33,10 +33,16 @@ variable "hub_enabled" {
   default     = true
 }
 
-variable "relay_ssh_cidrs" {
-  description = "Open port 22 on the relay for logs (EC2 Instance Connect range of the region: ip-ranges.json service EC2_INSTANCE_CONNECT). Empty = closed."
-  type        = list(string)
-  default     = []
+variable "budget_limit_usd" {
+  description = "Monthly AWS budget (USD, usage before credits). 0 = no budget. Needs alert_email."
+  type        = number
+  default     = 50
+}
+
+variable "budget_alert_usd" {
+  description = "Email when this month's usage (before credits) passes each amount (plan R7)"
+  type        = list(number)
+  default     = [10, 25, 50]
 }
 
 variable "alert_email" {

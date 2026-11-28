@@ -54,11 +54,6 @@ variable "allowed_cidrs" {
   default     = ["0.0.0.0/0"]
 }
 
-variable "ssh_cidrs" {
-  description = "Port 22 for reading logs; empty = closed. EC2 Instance Connect (console): EC2_INSTANCE_CONNECT range of the region in ip-ranges.json"
-  type        = list(string)
-  default     = []
-}
 
 data "aws_ami" "al2023" {
   most_recent = true
@@ -89,17 +84,6 @@ resource "aws_security_group" "relay" {
       to_port     = var.hub_port
       protocol    = "tcp"
       cidr_blocks = var.allowed_cidrs
-    }
-  }
-
-  dynamic "ingress" {
-    for_each = length(var.ssh_cidrs) > 0 ? [1] : []
-    content {
-      description = "ssh (logs)"
-      from_port   = 22
-      to_port     = 22
-      protocol    = "tcp"
-      cidr_blocks = var.ssh_cidrs
     }
   }
 
@@ -143,9 +127,35 @@ locals {
   EOT
 }
 
+# No SSH (plan R5): logs are read with SSM Session Manager (console: EC2 > Connect >
+# Session Manager, or `aws ssm start-session --target <relay_instance_id>`).
+# The SSM agent ships with AL2023; it only needs this role and outbound HTTPS.
+resource "aws_iam_role" "relay" {
+  name = "${var.name_prefix}-relay-ec2"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "relay_ssm" {
+  role       = aws_iam_role.relay.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "relay" {
+  name = "${var.name_prefix}-relay-ec2"
+  role = aws_iam_role.relay.name
+}
+
 resource "aws_instance" "relay" {
   ami                         = data.aws_ami.al2023.id
   instance_type               = var.instance_type
+  iam_instance_profile        = aws_iam_instance_profile.relay.name
   vpc_security_group_ids      = [aws_security_group.relay.id]
   user_data                   = local.user_data
   user_data_replace_on_change = true
@@ -175,6 +185,11 @@ output "hub_device_url" {
 output "hub_live_url" {
   description = "Web / live.html: ws://.../live?device=all"
   value       = var.hub_enabled ? "ws://${aws_eip.relay.public_ip}:${var.hub_port}/live" : null
+}
+
+output "instance_id" {
+  description = "aws ssm start-session --target <this>  (relay/hub logs: journalctl -u iot-dt-relay -f)"
+  value       = aws_instance.relay.id
 }
 
 output "public_dns" {
