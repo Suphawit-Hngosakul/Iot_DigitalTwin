@@ -93,8 +93,16 @@ class ApiError(Exception):
 def _s3_client():
     global _s3
     if _s3 is None:
-        # SigV4: presigned URLs of a regional bucket need it
-        _s3 = boto3.client("s3", config=Config(signature_version="s3v4"))
+        # SigV4 + the regional endpoint: presigned URLs on the global s3.amazonaws.com
+        # get a 307 to the region for a bucket younger than ~24 h, and the browser drops
+        # the redirect (no CORS headers on it) -> layer PNGs never load (#34).
+        region = os.environ.get("AWS_REGION")
+        _s3 = boto3.client(
+            "s3",
+            region_name=region,
+            endpoint_url=f"https://s3.{region}.amazonaws.com" if region else None,
+            config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}),
+        )
     return _s3
 
 
