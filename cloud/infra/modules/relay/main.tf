@@ -1,10 +1,10 @@
 # EC2 HTTP -> HTTPS relay for the ESP32 uploader (decision 2026-11-17:
 # the board has no RAM for TLS while recording, see cloud/relay/relay.py).
 # The same instance runs the realtime hub (ws:// :8081, D22, spec 22) so the
-# board talks to one IP and both stop/start together with the lab.
-# Learner Lab: default VPC, no instance profile needed (relay only calls the
-# public ingest API). The Elastic IP keeps the address when the lab stops and
-# starts the instance.
+# board talks to one IP and both stop/start together.
+# Default VPC. The relay only calls the public ingest API; the instance profile
+# below is just for SSM Session Manager (no SSH, plan R5). The Elastic IP keeps
+# the address if the instance is stopped and started.
 terraform {
   required_providers {
     aws = { source = "hashicorp/aws" }

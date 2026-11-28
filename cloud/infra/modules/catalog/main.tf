@@ -41,7 +41,7 @@ variable "date_start" {
 }
 
 variable "bytes_scanned_cutoff" {
-  description = "Athena stops a query that scans more than this many bytes (protects the lab budget)"
+  description = "Athena stops a query that scans more than this many bytes (protects the budget)"
   type        = number
 }
 

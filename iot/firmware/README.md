@@ -258,9 +258,9 @@ iot/firmware/
 | `[CFG] INGEST=` ยังเป็นค่าเก่า | ค่าในหน้า Setup (NVS) ทับ `secrets.h` → แก้ในหน้า Setup แล้วรีบูต |
 | `code=403` ทุกก้อน | `Device ID` ของเครื่องไม่ตรงกับ token → แก้ในหน้า Setup ให้ตรง แล้วลบ `.idx` ของไฟล์ที่โดนข้าม |
 | `code=-1` / `SSL - Memory allocation failed` / `X509 - Allocation of memory failed` | ยังตั้ง URL เป็น `https://` → เปลี่ยนเป็น `relay_url` (`http://…:8080/ingest`) |
-| `code=-1 connection refused` กับ `http://` | EC2 relay ดับ (Learner Lab หมด session) หรือ IP ผิด → เปิด lab ใหม่, `curl http://<ip>:8080/health` |
+| `code=-1 connection refused` กับ `http://` | EC2 relay ดับหรือ IP ผิด → `curl http://<ip>:8080/health` (ดู log ผ่าน SSM: `aws ssm start-session --target <relay_instance_id>`) |
 | `code=502` | relay ติดต่อ API Gateway ไม่ได้ → ดู `journalctl -u iot-dt-relay` บน EC2 |
-| `Backlog` ไม่ลดทั้งที่ `WiFi:UP` | ดู `[UPL] … resend in` (server ล่ม / Learner Lab หมด session) — ข้อมูลยังอยู่ใน SD ส่งต่อเองเมื่อกลับมา |
+| `Backlog` ไม่ลดทั้งที่ `WiFi:UP` | ดู `[UPL] … resend in` (server/relay ล่ม) — ข้อมูลยังอยู่ใน SD ส่งต่อเองเมื่อกลับมา |
 
 ## 8. ส่งค่า realtime (issue #6)
 
@@ -283,6 +283,6 @@ iot/firmware/
 | `[RT] realtime off` | ยังไม่ได้ใส่ Realtime URL หรือ `DEVICE_TOKEN` |
 | `RT realtime stopped … token rejected (401)` | token ไม่อยู่ใน `device_token_hashes` → แก้แล้ว `terraform apply` + รีบูตบอร์ด |
 | `RT realtime stopped … wss:// needs TLS` | URL เป็น `wss://` → เปลี่ยนเป็น `ws://…:8081/device` |
-| `[RT] connect … failed (-1)` วนไป | EC2 ดับ (Learner Lab หมด session) / IP หรือ port ผิด → `curl http://<ip>:8081/healthz` |
+| `[RT] connect … failed (-1)` วนไป | EC2 ดับ / IP หรือ port ผิด → `curl http://<ip>:8081/healthz` |
 | `[RT] connect … failed (404)` | path ไม่ใช่ `/device` |
 | `[STACK] rtTask:` ต่ำกว่า ~800 | เพิ่ม `STACK_RT` ใน `config.h` |

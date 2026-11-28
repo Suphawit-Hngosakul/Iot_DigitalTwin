@@ -16,7 +16,7 @@ http() { curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$@" || echo 000; 
 
 echo "== 1. AWS + Terraform"
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) \
-  && pass "credentials ใช้ได้ (account $ACCOUNT)" || { fail "aws credentials ใช้ไม่ได้ (Learner Lab หมด session?)"; exit 1; }
+  && pass "credentials ใช้ได้ (account $ACCOUNT)" || { fail "aws credentials ใช้ไม่ได้ (หมดอายุ? รัน aws configure / aws sso login ใหม่)"; exit 1; }
 BUCKET=$(out bucket)
 [ -n "$BUCKET" ] && pass "terraform output อ่านได้" || { fail "ไม่มี terraform output (ยังไม่ apply หรือ state หาย)"; exit 1; }
 PREFIX=iot-dt

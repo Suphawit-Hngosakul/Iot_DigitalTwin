@@ -46,5 +46,5 @@ aws stepfunctions start-execution --state-machine-arn "$SM" \
 ## ทดสอบ
 
 ```bash
-python -m pytest -q cloud/analytics/curated_merge/tests     # ไม่แตะ AWS (Athena MERGE ทดสอบบน Learner Lab ตามขั้นตอนใน PR)
+python -m pytest -q cloud/analytics/curated_merge/tests     # ไม่แตะ AWS (Athena MERGE ทดสอบบน AWS จริงหลัง deploy)
 ```

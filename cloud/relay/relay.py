@@ -7,7 +7,7 @@ the same body and headers to the ingest API over HTTPS. Status codes and
 replies are passed back unchanged, so the firmware status table still holds.
 
 Stdlib only. Config by environment:
-  UPSTREAM_URL      https://xxxx.execute-api.us-east-1.amazonaws.com/ingest (required)
+  UPSTREAM_URL      https://xxxx.execute-api.ap-southeast-2.amazonaws.com/ingest (required)
   PORT              listen port (default 8080)
   MAX_BODY          largest body accepted in bytes (default 65536)
   UPSTREAM_TIMEOUT  seconds (default 20)

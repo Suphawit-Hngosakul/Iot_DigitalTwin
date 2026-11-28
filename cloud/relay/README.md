@@ -10,7 +10,7 @@ ESP32 --HTTP :8080--> EC2 relay.py --HTTPS--> API Gateway POST /ingest --> Lambd
 - `iot-dt-relay.service`: systemd unit (อ่านค่าจาก `/etc/iot-dt-relay.env`)
 - สร้าง EC2 ด้วย module `relay` ใน `cloud/infra` (user data ติดตั้งให้เอง)
 
-**ข้อควรรู้:** ช่วงบอร์ด → EC2 ไม่เข้ารหัส (token วิ่งเป็น plain text) · Learner Lab หยุด EC2 เมื่อหมด session ต้องเปิด lab ใหม่ก่อนบอร์ดจะส่งได้ (ข้อมูลรอใน SD) · Elastic IP ทำให้ IP ไม่เปลี่ยน
+**ข้อควรรู้:** ช่วงบอร์ด → EC2 ไม่เข้ารหัส (token วิ่งเป็น plain text) · ถ้า EC2 ล่ม บอร์ดส่งไม่ได้จนกว่าจะขึ้นใหม่ (ข้อมูลรอใน SD แล้ว backfill เอง) · Elastic IP ทำให้ IP ไม่เปลี่ยน
 
 ทดสอบ:
 
@@ -21,7 +21,7 @@ curl -i -X POST http://<relay-ip>:8080/ingest -H "Authorization: Bearer $TOKEN" 
 sudo journalctl -u iot-dt-relay -f      # บน EC2: ตั้ง relay_ssh_cidrs = ["18.206.107.24/29"] ใน tfvars ก่อน แล้วใช้ EC2 Instance Connect ในหน้า console
 ```
 
-รันในเครื่อง: `UPSTREAM_URL=https://xxxx.execute-api.us-east-1.amazonaws.com/ingest python3 relay.py`
+รันในเครื่อง: `UPSTREAM_URL=https://xxxx.execute-api.ap-southeast-2.amazonaws.com/ingest python3 relay.py`
 
 เทสต์ (ไม่ต่อเน็ต: เปิด upstream ปลอมบน localhost):
 

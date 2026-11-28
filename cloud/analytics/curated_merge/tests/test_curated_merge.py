@@ -1,6 +1,6 @@
 """curated-merge (#32): period rules, SQL text, PlanMerge / CheckSources / Verify on moto S3.
 
-Athena MERGE itself cannot run here (moto has no Iceberg) — it is tested on Learner Lab.
+Athena MERGE itself cannot run here (moto has no Iceberg) — it is tested on the deployed stack.
 These tests pin the SQL (time windows, keys) and the orchestration around it.
 """
 import importlib.util

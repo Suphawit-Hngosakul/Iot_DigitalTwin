@@ -70,7 +70,7 @@ variable "catalog_date_start" {
 }
 
 variable "athena_bytes_scanned_cutoff" {
-  description = "Athena cancels a query that scans more than this (bytes, min 10 MB). Protects the lab budget from queries without a partition filter."
+  description = "Athena cancels a query that scans more than this (bytes, min 10 MB). Protects the budget from queries without a partition filter."
   type        = number
   default     = 1073741824 # 1 GiB
 }

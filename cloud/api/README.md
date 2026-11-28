@@ -1,7 +1,7 @@
 # cloud/api (issue #18, #34)
 
 API ให้เว็บดึงข้อมูล IoT ที่ผ่าน pipeline แล้ว (สเปค 40 §3) เว็บไม่ query Athena ตรง
-Lambda `iot-dt-api` (Python 3.12, `LabRole`, stdlib + boto3 ไม่ใช้ layer) หลัง HTTP API ของตัวเอง แยกจาก API ingest
+Lambda `iot-dt-api` (Python 3.12, role `iot-dt-api-lambda`, stdlib + boto3 ไม่ใช้ layer) หลัง HTTP API ของตัวเอง แยกจาก API ingest
 รายละเอียด request/response ดู `openapi.yaml`
 
 | Method | Path | Query | อ่านจาก |
@@ -18,7 +18,7 @@ Lambda `iot-dt-api` (Python 3.12, `LabRole`, stdlib + boto3 ไม่ใช้ l
 
 ### satellite (#34)
 
-- `/layers` ตอบรายการ period ที่ publish แล้ว + ต่อ layer: `url` (presigned GET อายุ `LAYER_URL_TTL_S` = 3600 วินาที เพราะ bucket บล็อก public), `coordinates` (4 มุม [lon, lat] สำหรับ MapLibre), `legend`; `static_layers` = `building_density` (ต่อเซลล์ 90 m ไม่ขึ้นกับ period) อายุ URL จริงไม่เกินอายุ credentials ของ LabRole ใน Lambda
+- `/layers` ตอบรายการ period ที่ publish แล้ว + ต่อ layer: `url` (presigned GET อายุ `LAYER_URL_TTL_S` = 3600 วินาที เพราะ bucket บล็อก public), `coordinates` (4 มุม [lon, lat] สำหรับ MapLibre), `legend`; `static_layers` = `building_density` (ต่อเซลล์ 90 m ไม่ขึ้นกับ period) อายุ URL จริงไม่เกินอายุ credentials ชั่วคราวของ role ใน Lambda
 - `/grid` และ `/grid/{cell_id}` ไม่ใส่ `period` = composite ฤดูล่าสุดที่ publish; รับ `scene_…`, `season_…`, `month_YYYY-MM`; `vars` ต้องอยู่ใน `GRID_VARS` (ค่าเริ่ม `lst_mean,ndvi_mean,ndbi_mean,builtup_pct`) ไม่ถูกต้อง → 400 ก่อนถึง Athena; ไม่มีข้อมูล → 404
 - รูปเซลล์ (Polygon) คำนวณจาก `cell_id` ใน Lambda ด้วย `common/grid.py` ไม่ต้องใช้ pyproj; ไม่มี footprint อาคารหรือเส้นเขต (D17)
 - ค่า IoT ใน `/grid` เป็น `null` จนกว่า IoT จะเข้ากริดหลักสี่
