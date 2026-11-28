@@ -60,7 +60,8 @@ locals {
     pbf     = "application/x-protobuf"
   }
 
-  # config.json is managed below, never taken from dist/
+  # config.json is managed below, never taken from dist/.
+  # data/buildings.geojson (web/scripts/convert_buildings.py) may be public and is uploaded if present.
   dist_files = [for f in try(fileset(var.dist_dir, "**"), []) : f if f != "config.json"]
 }
 
@@ -205,13 +206,14 @@ locals {
 }
 
 resource "aws_s3_object" "dist" {
-  for_each      = toset(local.dist_files)
-  bucket        = aws_s3_bucket.web.id
-  key           = each.value
-  source        = "${var.dist_dir}/${each.value}"
-  etag          = filemd5("${var.dist_dir}/${each.value}")
-  content_type  = lookup(local.mime, lower(reverse(split(".", each.value))[0]), "application/octet-stream")
-  cache_control = endswith(each.value, ".html") ? "no-cache" : "public, max-age=31536000, immutable"
+  for_each     = toset(local.dist_files)
+  bucket       = aws_s3_bucket.web.id
+  key          = each.value
+  source       = "${var.dist_dir}/${each.value}"
+  etag         = filemd5("${var.dist_dir}/${each.value}")
+  content_type = lookup(local.mime, lower(reverse(split(".", each.value))[0]), "application/octet-stream")
+  # only Vite's hashed assets/ are immutable; data/*, index.html etc. keep their name -> revalidate
+  cache_control = startswith(each.value, "assets/") ? "public, max-age=31536000, immutable" : "no-cache"
 }
 
 resource "aws_s3_object" "config" {
