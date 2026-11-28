@@ -1,5 +1,7 @@
 import * as echarts from "echarts";
-import { api } from "./api";
+import { api, errMsg } from "../api";
+import { fmt } from "../utils/format";
+import { byId, errHtml, esc } from "../utils/html";
 import type {
   AnalyticsCorrelation,
   AnalyticsGroups,
@@ -9,7 +11,7 @@ import type {
   AnalyticsStationDiurnal,
   AnalyticsSummary,
   GridFeatureCollection,
-} from "./types";
+} from "../types";
 
 const LABEL: Record<string, string> = {
   lst_mean: "LST",
@@ -19,20 +21,21 @@ const LABEL: Record<string, string> = {
   air_temp_mean: "air_temp",
   db_spl_mean: "dB(SPL)",
 };
-const fmt = (v: unknown, d = 1) => (v == null || (typeof v === "number" && Number.isNaN(v)) ? "—" : typeof v === "number" ? v.toFixed(d) : String(v));
-const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
 export class StatsController {
   private charts: Record<string, echarts.ECharts> = {};
   private lastKey: string | null = null;
   private scGrid: GridFeatureCollection | null = null;
 
-  constructor(private getPeriod: () => string | null, private getMatch: () => "all" | "window") {
-    (document.getElementById("sc-x") as HTMLSelectElement).onchange = () => this.drawScatter();
+  constructor(
+    private getPeriod: () => string | null,
+    private getMatch: () => "all" | "window",
+  ) {
+    byId<HTMLSelectElement>("sc-x").onchange = () => this.drawScatter();
   }
 
   private chart(id: string) {
-    return (this.charts[id] ||= echarts.init(document.getElementById(id)!));
+    return (this.charts[id] ||= echarts.init(byId(id)));
   }
 
   resize() {
@@ -49,7 +52,7 @@ export class StatsController {
     this.lastKey = key;
 
     const q = { period: this.getPeriod(), match: this.getMatch() };
-    const headlineEl = document.getElementById("headline")!;
+    const headlineEl = byId("headline");
     try {
       const [sum, cor, reg, imp, grp, sac, s9, grid] = await Promise.all([
         api<AnalyticsSummary>("/analytics/summary", q),
@@ -83,7 +86,7 @@ export class StatsController {
       const bldgR = cor.r[li]?.[cor.variables.indexOf("builtup_pct")];
       const airR = cor.r[li]?.[cor.variables.indexOf("air_temp_mean")];
 
-      document.getElementById("research-takeaways")!.innerHTML = `
+      byId("research-takeaways").innerHTML = `
         <div class="tk-card green">
           <div class="tk-title">1. อิทธิพลของพื้นที่สีเขียว (NDVI)</div>
           <div class="tk-val">r = ${fmt(ndviR, 2)}</div>
@@ -107,10 +110,10 @@ export class StatsController {
       `;
 
       const unit: Record<string, string> = { lst_mean: "°C", air_temp_mean: "°C", builtup_pct: "%", db_spl_mean: "dB" };
-      document.getElementById("s1-cards")!.innerHTML = sum.rows
+      byId("s1-cards").innerHTML = sum.rows
         .map(
           (r) =>
-            `<div class="kpi"><div class="l">${LABEL[r.variable] || r.variable} เฉลี่ย (n=${r.n})</div><div class="v">${fmt(r.mean, 2)} ${unit[r.variable] || ""}</div><div class="l">SD ${fmt(r.sd, 2)} · ${fmt(r.min, 2)}–${fmt(r.max, 2)} · p90 ${fmt(r.p90, 2)}</div></div>`
+            `<div class="kpi"><div class="l">${LABEL[r.variable] || r.variable} เฉลี่ย (n=${r.n})</div><div class="v">${fmt(r.mean, 2)} ${unit[r.variable] || ""}</div><div class="l">SD ${fmt(r.sd, 2)} · ${fmt(r.min, 2)}–${fmt(r.max, 2)} · p90 ${fmt(r.p90, 2)}</div></div>`,
         )
         .join("");
 
@@ -125,10 +128,24 @@ export class StatsController {
           grid: { left: 70, right: 70, top: 10, bottom: 50 },
           xAxis: { type: "category", data: cor.variables.map((v) => LABEL[v] || v), axisLabel: { interval: 0 } },
           yAxis: { type: "category", data: cor.variables.map((v) => LABEL[v] || v), axisLabel: { interval: 0 } },
-          visualMap: { min: -1, max: 1, calculable: true, orient: "vertical", right: 0, top: "center", inRange: { color: ["#2166ac", "#f7f7f7", "#b2182b"] } },
-          series: [{ type: "heatmap", data: hm, label: { show: true, formatter: (p: { value: [number, number, number] }) => p.value[2].toFixed(2), fontSize: 10 } }],
+          visualMap: {
+            min: -1,
+            max: 1,
+            calculable: true,
+            orient: "vertical",
+            right: 0,
+            top: "center",
+            inRange: { color: ["#2166ac", "#f7f7f7", "#b2182b"] },
+          },
+          series: [
+            {
+              type: "heatmap",
+              data: hm,
+              label: { show: true, formatter: (p: { value: [number, number, number] }) => p.value[2].toFixed(2), fontSize: 10 },
+            },
+          ],
         },
-        true
+        true,
       );
 
       this.scGrid = grid;
@@ -152,10 +169,10 @@ export class StatsController {
               },
             ],
           },
-          true
+          true,
         );
         const vifWarn = s3.terms.filter((t) => t.vif > 5);
-        document.getElementById("s3-note")!.innerHTML =
+        byId("s3-note").innerHTML =
           `S3: <code>${esc(s3.formula)}</code> R² = ${s3.r2 ?? "—"} (n=${s3.n}) · ` +
           s3.terms.map((t) => `${LABEL[t.term]} β*=${t.std_coef} VIF=${t.vif}`).join(", ") +
           (vifWarn.length ? ` <span class="warn">VIF > 5: ${vifWarn.map((t) => LABEL[t.term]).join(", ")} ซ้อนกัน</span>` : "") +
@@ -177,10 +194,10 @@ export class StatsController {
             },
           ],
         },
-        true
+        true,
       );
 
-      document.getElementById("s7")!.innerHTML =
+      byId("s7").innerHTML =
         sac.rows.map((r) => `<span>Moran's I (${esc(r.target)})</span><b>${r.morans_i} (p=${r.p_value})</b>`).join("") +
         `<span>R² ของ S3</span><b>${s3?.r2 ?? "—"}</b><span>R² ของ S4</span><b>${s4?.r2 ?? "—"}</b>`;
 
@@ -198,10 +215,10 @@ export class StatsController {
             data: s.hours.map((h) => h.air_temp_mean),
           })),
         },
-        true
+        true,
       );
     } catch (e: unknown) {
-      headlineEl.innerHTML = `<span class="err">${esc(e instanceof Error ? e.message : String(e))}</span>`;
+      headlineEl.innerHTML = errHtml(errMsg(e));
     }
   }
 
@@ -211,7 +228,7 @@ export class StatsController {
       this.chart("c-scatter").setOption({ title: { text: "/grid ไม่มีข้อมูล", left: "center", top: "middle" } }, true);
       return;
     }
-    const sel = (document.getElementById("sc-x") as HTMLSelectElement).value;
+    const sel = byId<HTMLSelectElement>("sc-x").value;
     const [xk, yk] = sel === "air" ? ["lst_mean", "air_temp_mean"] : [sel, "lst_mean"];
     const pts = g.features
       .map((f) => f.properties)
@@ -236,7 +253,7 @@ export class StatsController {
           yAxis: { show: false },
           series: [],
         },
-        true
+        true,
       );
       return;
     }
@@ -255,11 +272,19 @@ export class StatsController {
         yAxis: { type: "value", scale: true, name: LABEL[yk] },
         series: [
           { type: "scatter", data: pts, symbolSize: 4, itemStyle: { color: "#0f766e", opacity: 0.5 } },
-          { type: "line", data: [[x0, a + b * x0], [x1, a + b * x1]], showSymbol: false, lineStyle: { color: "#b91c1c", width: 2 } },
+          {
+            type: "line",
+            data: [
+              [x0, a + b * x0],
+              [x1, a + b * x1],
+            ],
+            showSymbol: false,
+            lineStyle: { color: "#b91c1c", width: 2 },
+          },
         ],
         title: { text: `n = ${n} เซลล์ · slope = ${b.toFixed(2)}`, right: 10, top: 0, textStyle: { fontSize: 11, color: "#6b7785" } },
       },
-      true
+      true,
     );
   }
 }

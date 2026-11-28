@@ -1,23 +1,3 @@
-export interface AppConfig {
-  api_url: string;
-  hub_live_url: string;
-  mock: boolean;
-}
-
-export interface ApiResult<T = unknown> {
-  status: number;
-  body: T;
-}
-
-export interface ApiLogEntry {
-  url: string;
-  status: number;
-  body: unknown;
-  ms: number;
-  at: Date;
-  source: "mock" | "real";
-}
-
 export interface DeviceInfo {
   device_id: string;
   device_type: "Mobile" | "Stationary";
@@ -199,19 +179,6 @@ export interface AnalyticsStationDiurnal {
   stations: { device_id: string; site_name: string | null; hours: { hour: number; air_temp_mean: number | null }[] }[];
 }
 
-export interface LiveDeviceState {
-  device_id: string;
-  online: boolean;
-  ts?: string;
-  dba?: number;
-  db_spl?: number;
-  lux?: number;
-  temp_c?: number;
-  humidity_pct?: number;
-  lat?: number;
-  lon?: number;
-  health?: { heap_free: number; rssi: number; sd_errors?: number; backlog_rows?: number };
-}
 export interface BuildingFeatureProperties {
   bldg_id: string;
   floors: number;
@@ -219,7 +186,7 @@ export interface BuildingFeatureProperties {
   area_sqm: number;
   bldg_type: string;
   bldg_source: string;
-  cell_id: string | null;
+  cell_id?: string | null;
 }
 
 export interface BuildingsGeoJson {

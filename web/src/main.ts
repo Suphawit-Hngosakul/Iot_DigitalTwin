@@ -1,117 +1,141 @@
-import "./style.css";
-import { loadConfig } from "./api";
-import { MapController } from "./map-view";
-import { StatsController } from "./stats-view";
-import { ResearchController } from "./research-view";
-import { IotController } from "./iot-view";
+import "./styles/index.css";
+import { CFG, loadConfig } from "./config";
+import { IotHistoryController } from "./iot/iot-history";
+import { IotLiveController } from "./iot/iot-live";
+import type { MatchMode } from "./map/context";
+import { MapController } from "./map/map-controller";
 import { CascadingPeriodController } from "./period-selector";
-import type { LayersResponse } from "./types";
+import { ResearchController } from "./stats/research-view";
+import { StatsController } from "./stats/stats-view";
+import { byId } from "./utils/html";
+
+type TabName = "map" | "stats" | "iot";
 
 async function bootstrap() {
   await loadConfig();
+  showConfigNotice();
 
   let currentPeriod: string | null = null;
-  let currentMatch: "all" | "window" = "all";
-  let activeTab = "map";
+  let currentMatch: MatchMode = "all";
+  let activeTab: TabName = "map";
 
-  const statsCtrl = new StatsController(() => currentPeriod, () => currentMatch);
-  const researchCtrl = new ResearchController(() => currentPeriod, () => currentMatch);
-  const iotCtrl = new IotController();
+  const stats = new StatsController(
+    () => currentPeriod,
+    () => currentMatch,
+  );
+  const research = new ResearchController(
+    () => currentPeriod,
+    () => currentMatch,
+  );
+  const iotHistory = new IotHistoryController();
+  const iotLive = new IotLiveController();
 
-  const handlePeriodSelected = async (nextPeriod: string) => {
-    currentPeriod = nextPeriod;
-    await mapCtrl.refreshPeriod();
-    if (activeTab === "stats") {
-      if (!researchSub.classList.contains("hidden")) researchCtrl.load(true);
-      else statsCtrl.load(true);
-    } else {
-      statsCtrl.invalidate();
-      researchCtrl.invalidate();
-    }
-  };
+  const periodCtrl = new CascadingPeriodController((p) => {
+    currentPeriod = p;
+    onPeriodOrMatchChanged();
+  });
 
-  const periodCtrl = new CascadingPeriodController(handlePeriodSelected);
-
-  let mapCtrl!: MapController;
-  mapCtrl = new MapController(
+  const mapCtrl = new MapController(
     () => periodCtrl.getPeriod() || currentPeriod,
-    (p: string, periods: LayersResponse["periods"]) => {
+    (p, periods) => {
       currentPeriod = p;
       periodCtrl.setPeriods(periods, p, false);
     },
-    () => currentMatch
+    () => currentMatch,
   );
 
-  const chartsSub = document.getElementById("stats-sub-charts")!;
-  const researchSub = document.getElementById("stats-sub-research")!;
-  const subChartsBtn = document.getElementById("sub-charts-btn")!;
-  const subResearchBtn = document.getElementById("sub-research-btn")!;
+  // ── แท็บ 2: กราฟวิเคราะห์ ↔ คำนวณ & เทียบงานวิจัย ─────────────
+  const chartsSub = byId("stats-sub-charts");
+  const researchSub = byId("stats-sub-research");
+  const isResearch = () => !researchSub.classList.contains("hidden");
 
-  function syncStatsView() {
-    const isResearch = subResearchBtn.classList.contains("active");
-    chartsSub.classList.toggle("hidden", isResearch);
-    researchSub.classList.toggle("hidden", !isResearch);
-    if (isResearch) {
-      researchCtrl.load();
+  function loadStatsView(force = false) {
+    if (isResearch()) {
+      research.load(force);
     } else {
-      statsCtrl.load();
-      statsCtrl.resize();
+      stats.load(force);
+      stats.resize();
     }
   }
 
-  function showTab(name: string) {
+  function showStatsSub(sub: "charts" | "research") {
+    const research = sub === "research";
+    chartsSub.classList.toggle("hidden", research);
+    researchSub.classList.toggle("hidden", !research);
+    byId("sub-charts-btn").classList.toggle("active", !research);
+    byId("sub-research-btn").classList.toggle("active", research);
+    loadStatsView();
+  }
+
+  byId("sub-charts-btn").onclick = () => showStatsSub("charts");
+  byId("sub-research-btn").onclick = () => showStatsSub("research");
+  byId("sub-back-btn").onclick = () => showStatsSub("charts");
+
+  // ── แท็บ 3: Realtime ↔ ข้อมูลย้อนหลัง ─────────────────────────
+  function showIotSub(sub: "live" | "hist") {
+    const hist = sub === "hist";
+    byId("iot-mode-live").classList.toggle("active", !hist);
+    byId("iot-mode-hist").classList.toggle("active", hist);
+    byId("iot-sub-live").classList.toggle("hidden", hist);
+    byId("iot-sub-hist").classList.toggle("hidden", !hist);
+    if (hist) iotHistory.resize();
+    else iotLive.resize();
+  }
+
+  byId("iot-mode-live").onclick = () => showIotSub("live");
+  byId("iot-mode-hist").onclick = () => showIotSub("hist");
+
+  // ── แท็บหลัก ───────────────────────────────────────────────
+  function showTab(name: TabName) {
     activeTab = name;
-    document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("active", (x as HTMLElement).dataset.tab === name));
+    document.querySelectorAll<HTMLElement>("#tabs button").forEach((x) => x.classList.toggle("active", x.dataset.tab === name));
     document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x.id === "tab-" + name));
-    if (name === "map") mapCtrl.map.resize();
-    if (name === "stats") {
-      syncStatsView();
+    if (name === "map") mapCtrl.resize();
+    if (name === "stats") loadStatsView();
+    if (name === "iot") {
+      iotHistory.load();
+      requestAnimationFrame(() => iotLive.resize());
     }
-    if (name === "iot") iotCtrl.load();
-    statsCtrl.resize();
-    iotCtrl.resize();
+    stats.resize();
+    iotHistory.resize();
   }
 
-  document.querySelectorAll("#tabs button").forEach((b) => {
-    (b as HTMLElement).onclick = () => showTab((b as HTMLElement).dataset.tab!);
+  document.querySelectorAll<HTMLElement>("#tabs button").forEach((b) => {
+    b.onclick = () => showTab(b.dataset.tab as TabName);
   });
 
-  const showStatsSub = (sub: "charts" | "research") => {
-    const isResearch = sub === "research";
-    chartsSub.classList.toggle("hidden", isResearch);
-    researchSub.classList.toggle("hidden", !isResearch);
-    subChartsBtn.classList.toggle("active", !isResearch);
-    subResearchBtn.classList.toggle("active", isResearch);
-    if (isResearch) {
-      researchCtrl.load();
-    } else {
-      statsCtrl.load();
-      statsCtrl.resize();
-    }
-  };
-
-  subChartsBtn.onclick = () => showStatsSub("charts");
-  subResearchBtn.onclick = () => showStatsSub("research");
-  document.getElementById("sub-back-btn")!.onclick = () => showStatsSub("charts");
-
-  (document.getElementById("match") as HTMLSelectElement).onchange = async (e) => {
-    currentMatch = (e.target as HTMLSelectElement).value as "all" | "window";
+  // ── period / โหมดเวลา เปลี่ยน → แผนที่โหลดใหม่ทันที, สถิติโหลดใหม่เมื่ออยู่ในแท็บนั้น ──
+  async function onPeriodOrMatchChanged() {
     await mapCtrl.refreshPeriod();
     if (activeTab === "stats") {
-      if (!researchSub.classList.contains("hidden")) researchCtrl.load(true);
-      else statsCtrl.load(true);
+      loadStatsView(true);
     } else {
-      statsCtrl.invalidate();
-      researchCtrl.invalidate();
+      stats.invalidate();
+      research.invalidate();
     }
+  }
+
+  byId<HTMLSelectElement>("match").onchange = (e) => {
+    currentMatch = (e.target as HTMLSelectElement).value as MatchMode;
+    onPeriodOrMatchChanged();
   };
 
   window.addEventListener("resize", () => {
-    statsCtrl.resize();
-    iotCtrl.resize();
+    stats.resize();
+    iotHistory.resize();
   });
 
-  await mapCtrl.initData();
+  mapCtrl.init();
+  iotLive.init();
+}
+
+/** ไม่มี api_url ใน config.json → บอกที่หัวเว็บ (ทุกแผงจะขึ้น error ของตัวเองด้วย) */
+function showConfigNotice() {
+  if (CFG.api_url) return;
+  const badge = byId("config-badge");
+  badge.textContent = "ยังไม่ได้ตั้งค่า API";
+  badge.title = "ใส่ api_url ใน config.json (สร้างด้วย make-config.sh หรือ cloud/infra/deploy.py)";
+  badge.classList.remove("hidden");
 }
 
 bootstrap();

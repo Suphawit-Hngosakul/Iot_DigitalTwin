@@ -1,75 +1,46 @@
-import type { AppConfig, ReadingMinuteRow, ReadingsResponse } from "./types";
-import { handleMockApi } from "./mock-api";
+import { CFG } from "./config";
+import type { ReadingMinuteRow, ReadingsResponse } from "./types";
 
-export interface RuntimeEnv extends AppConfig {
-  deploy_id?: string;
-}
+export type ApiParams = Record<string, unknown>;
 
-export const CFG: RuntimeEnv = { api_url: "", hub_live_url: "", mock: false, deploy_id: "" };
-const MOCK_FALLBACK_ROUTES = /^\/analytics\//;
-
-function normalizeApiUrl(raw: string): string {
-  let u = raw.trim().replace(/\/$/, "");
-  if (u && !/^https?:\/\//i.test(u)) u = "https://" + u;
-  return u;
-}
-
-export async function loadConfig(): Promise<RuntimeEnv> {
-  let deployedApi = import.meta.env.VITE_API_URL || "";
-  let deployId = "";
-
-  try {
-    const r = await fetch(`./config.json?t=${Date.now()}`, { cache: "no-store" });
-    if (r.ok) {
-      const j = await r.json();
-      if (j.api_url) deployedApi = String(j.api_url);
-      if (j.deploy_id) deployId = String(j.deploy_id);
-    }
-  } catch {
-    // กรณีรันในเครื่อง Local ที่ไม่มี config.json
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body?: unknown,
+  ) {
+    super(message);
   }
-
-  CFG.api_url = normalizeApiUrl(deployedApi);
-  CFG.deploy_id = deployId;
-  CFG.mock = !CFG.api_url;
-  return CFG;
 }
 
-export async function api<T = unknown>(path: string, params: Record<string, unknown> = {}): Promise<T> {
-  const qs = new URLSearchParams(
+function buildQuery(params: ApiParams): string {
+  return new URLSearchParams(
     Object.entries(params)
       .filter(([, v]) => v != null && v !== "")
-      .map(([k, v]) => [k, String(v)])
+      .map(([k, v]) => [k, String(v)]),
   ).toString();
-  const url = path + (qs ? "?" + qs : "");
-  let status = 0;
-  let body: unknown;
+}
 
-  if (!CFG.mock) {
-    try {
-      const r = await fetch(CFG.api_url + url);
-      status = r.status;
-      body = await r.json().catch(() => ({ error: "response is not JSON" }));
-      if ((status === 404 || status === 501) && MOCK_FALLBACK_ROUTES.test(path)) {
-        ({ status, body } = await handleMockApi(path, params));
-      }
-    } catch (e: unknown) {
-      if (MOCK_FALLBACK_ROUTES.test(path)) {
-        ({ status, body } = await handleMockApi(path, params));
-      } else {
-        status = 0;
-        body = { error: "ไม่สามารถเชื่อมต่อ API ได้: " + (e instanceof Error ? e.message : String(e)) };
-      }
-    }
-  } else {
-    ({ status, body } = await handleMockApi(path, params));
+/** เรียก API ตัวเดียวของทั้งเว็บ: GET api_url + path แล้วคืน JSON (status ≠ 200 → ApiError) */
+export async function api<T = unknown>(path: string, params: ApiParams = {}): Promise<T> {
+  if (!CFG.api_url) throw new ApiError("ยังไม่ได้ตั้งค่า api_url ใน config.json", 0);
+
+  const qs = buildQuery(params);
+  let r: Response;
+  try {
+    r = await fetch(CFG.api_url + path + (qs ? "?" + qs : ""));
+  } catch (e: unknown) {
+    throw new ApiError("ไม่สามารถเชื่อมต่อ API ได้: " + errMsg(e), 0);
   }
-
-  if (status !== 200) {
-    const errMsg = (body as { error?: string })?.error || "HTTP " + status;
-    throw Object.assign(new Error(errMsg), { status, body });
+  const body = await r.json().catch(() => ({ error: "response is not JSON" }));
+  if (r.status !== 200) {
+    throw new ApiError((body as { error?: string })?.error || "HTTP " + r.status, r.status, body);
   }
   return body as T;
+}
+
+export function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 export function toMinuteObjects(res: ReadingsResponse): ReadingMinuteRow[] {

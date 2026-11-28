@@ -1,0 +1,83 @@
+/* กล่องประเมินความร้อนใน drawer */
+
+/* Heat Assessment Verdict Box inside Right Drawer */
+.heat-verdict {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.verdict-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-bottom: 7px;
+  border-bottom: 1px dashed #e2e8f0;
+}
+
+.verdict-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.verdict-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.verdict-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.v-pill {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+
+.v-pill.cool {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.v-pill.moderate {
+  background: #fef9c3;
+  color: #a16207;
+}
+
+.v-pill.warn {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.v-pill.danger {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.v-pill.none {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.verdict-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.verdict-desc.danger-text {
+  color: #b91c1c;
+  font-weight: 600;
+}
