@@ -25,7 +25,7 @@ from common import schema
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
-DEFAULT_LOOKBACK_HOURS = 24
+DEFAULT_LOOKBACK_HOURS = 72  # late uploads (relay backlog, SD resend) are still picked up
 
 _s3 = None
 
