@@ -21,11 +21,10 @@ variable "cors_allowed_origins" {
   default     = []
 }
 
-# Learner Lab: the aws_s3_bucket resource always reads the bucket's Object Lock
-# configuration, and the Learner Lab SCP denies s3:GetBucketObjectLockConfiguration
-# (403) -> plan/apply fails (c3d9ba3). So the bucket is created with the AWS CLI
-# from Terraform (needs `aws` on PATH: CloudShell has it) and Terraform manages only
-# the settings below. Idempotent: an existing bucket is left as it is.
+# The bucket is created with the AWS CLI from Terraform (needs `aws` + `bash` on
+# PATH) and Terraform manages only the settings below. Kept from the Learner Lab
+# days, whose SCP denied s3:GetBucketObjectLockConfiguration that the
+# aws_s3_bucket resource always reads (c3d9ba3); it also works on any account. Idempotent: an existing bucket is left as it is.
 # `terraform destroy` does NOT delete the bucket or its data (delete it by hand).
 resource "terraform_data" "bucket" {
   input = var.bucket_name

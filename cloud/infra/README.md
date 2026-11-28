@@ -4,19 +4,20 @@ IaC ของทุกอย่างใน `cloud/` ด้วย **Terraform/Op
 
 ห้าม commit `*.pem`, `terraform.tfstate*` และ `*.tfvars` ที่มีค่าจริง
 
-ข้อจำกัด Learner Lab: สร้าง IAM role เองไม่ได้ → อ้าง `LabRole` ที่มีอยู่, region us-east-1
+AWS account ของตัวเอง (D27): region `ap-southeast-2` เท่านั้น (SCP ของบัญชี Projects เปิดแค่ region ที่เลือกตอนสมัคร) ทุกบริการมี IAM role ของตัวเอง (module `iam`) deploy ทั้งชุดด้วย `python cloud/infra/deploy.py` แล้วเติมข้อมูลด้วย `python cloud/infra/post_apply.py --all`
 
 ## module ที่มีแล้ว
 
 | module | สเปค | issue | มีอะไร |
 |---|---|---|---|
 | `storage` | 01 | #9, #17 | S3 bucket (block public, SSE-S3, BucketOwnerEnforced) + lifecycle (`athena-results/` 7 วัน) |
-| `ingest` | 20 | #9 | Lambda `iot-dt-ingest` (Py3.12, LabRole) + HTTP API `POST /ingest` + log 14 วัน |
-| `relay` | 10, 22 | #7, #10 | EC2 t3.micro + Elastic IP + SG port 8080/8081: relay รับ HTTP จากบอร์ดส่งต่อ HTTPS ไป ingest (`cloud/relay/`) + realtime hub `ws://` (`cloud/realtime-hub/`, D22; ปิดเฉพาะ hub ด้วย `hub_enabled = false`, URL ดู `terraform output hub_device_url` / `hub_live_url`) ปิดทั้งเครื่องด้วย `relay_enabled = false` |
+| `iam` | 00 | R1 | role ต่อบริการ `iot-dt-<service>-lambda` (สิทธิ์ S3/Athena/Glue เท่าที่ใช้) + `iot-dt-sfn` + `iot-dt-trigger` (EventBridge/Scheduler → Step Functions) |
+| `ingest` | 20 | #9 | Lambda `iot-dt-ingest` (Py3.12, role `iot-dt-ingest-lambda`) + HTTP API `POST /ingest` + log 14 วัน |
+| `relay` | 10, 22 | #7, #10 | EC2 t3.micro + Elastic IP + SG port 8080/8081 (ไม่เปิด 22 ดู log ผ่าน SSM, `relay_instance_id`): relay รับ HTTP จากบอร์ดส่งต่อ HTTPS ไป ingest (`cloud/relay/`) + realtime hub `ws://` (`cloud/realtime-hub/`, D22; ปิดเฉพาะ hub ด้วย `hub_enabled = false`, URL ดู `terraform output hub_device_url` / `hub_live_url`) ปิดทั้งเครื่องด้วย `relay_enabled = false` |
 | `pipeline` | 30 | #11–#16 | Lambda 6 ตัว `iot-dt-iot-*` + Step Functions `iot-dt-iot-pipeline` + Scheduler ทุกชั่วโมงนาทีที่ 5 (เวลาไทย) + SNS `iot-dt-iot-pipeline-alerts` (`cloud/pipeline/`) |
 | `catalog` | 40 | #17 | Glue database `iot_walking` + ตาราง `raw_csv`, `raw_csv_unknown`, `readings_1s`, `readings_1min`, `quality`, `satellite_grid` (partition projection) + Athena workgroup `iot_walking` + saved queries + lifecycle `athena-results/` 7 วัน (ใน `storage`) |
-| `api` | 40 | #18 | Lambda `iot-dt-api` (Py3.12, LabRole) + HTTP API แยก `iot-dt-api`: `GET /devices /latest /readings /quality` + CORS (`api_allowed_origins`) + log 14 วัน (`cloud/api/`) |
-| `satellite` | 50 | #25, #27 | layer `iot-dt-gee` (earthengine-api) + Lambda `iot-dt-satellite-test` และ `iot-dt-satellite-ingest` (Py3.12, LabRole, timeout 900 s) + EventBridge รายวัน `cron(0 2 * * ? *)` (ตั้งด้วย `satellite_ingest_schedule`, `""` = รันมือเท่านั้น) ยืนยันตัวกับ GEE ด้วย WIF ไม่มี key (`cloud/satellite/`) ปิดไว้เป็นค่าเริ่มต้น เปิดด้วย `satellite_enabled = true` แล้ว apply จะรัน `cloud/satellite/layer/build_layer.py` สร้าง zip ให้เอง (ต้องมี Python + pip) |
+| `api` | 40 | #18 | Lambda `iot-dt-api` (Py3.12, role `iot-dt-api-lambda`) + HTTP API แยก `iot-dt-api`: `GET /devices /latest /readings /quality` + CORS (`api_allowed_origins`) + log 14 วัน (`cloud/api/`) |
+| `satellite` | 50 | #25, #27 | layer `iot-dt-gee` (earthengine-api) + Lambda `iot-dt-satellite-test` และ `iot-dt-satellite-ingest` (Py3.12, role `iot-dt-satellite-lambda`, timeout 900 s) + EventBridge รายวัน `cron(0 2 * * ? *)` (ตั้งด้วย `satellite_ingest_schedule`, `""` = รันมือเท่านั้น) ยืนยันตัวกับ GEE ด้วย WIF ไม่มี key (`cloud/satellite/`) ปิดไว้เป็นค่าเริ่มต้น เปิดด้วย `satellite_enabled = true` แล้ว apply จะรัน `cloud/satellite/layer/build_layer.py` สร้าง zip ให้เอง (ต้องมี Python + pip) |
 | `satellite_pipeline` | 32, 51 | #30, #31 | Lambda 6 ตัว `iot-dt-sat-*` + Step Functions `iot-dt-sat-pipeline` + EventBridge rule `iot-dt-sat-complete` (S3 Object Created `raw/satellite/*/_COMPLETE`, ปิดด้วย `satellite_pipeline_trigger_enabled = false`) + data contracts (`cloud/pipeline/contracts/*.yaml` แปลงเป็น JSON ตอน zip) แจ้งเตือนผ่าน SNS ของ `pipeline` ปิดไว้เป็นค่าเริ่มต้น เปิดด้วย `satellite_pipeline_enabled = true` (เปิด S3 → EventBridge ของ bucket ด้วย) |
 | `curated_merge` | 60 §2.1 | #32 | Lambda 4 ตัว `iot-dt-curated-*` + Step Functions `iot-dt-curated-merge` (PlanMerge → CheckSources → MergeCurated → VerifyCurated, `WaitingForOtherSources` เมื่อแหล่งไม่ครบ) + EventBridge rule `iot-dt-curated-published` (S3 `curated/_success/satellite|buildings/*.json`) + Scheduler รายวัน 10:00 น. เวลาไทย (`curated_merge_daily_schedule`, `""` = ไม่รัน) สร้างตาราง Iceberg `iot_walking.cell_period` ที่ `curated/cell_period/` (`cloud/analytics/curated_merge/`) ปิดไว้เป็นค่าเริ่มต้น เปิดด้วย `curated_merge_enabled = true` (ต้องเปิด `satellite_pipeline_enabled` ด้วย) |
 
@@ -54,12 +55,11 @@ Windows (PowerShell): `winget install --id Hashicorp.Terraform -e` แล้ว�
 
 ### ขั้น 1: ตั้ง credentials ของ AWS
 
-1. Learner Lab: กด **Start Lab** แล้วเปิด **AWS Details** → **AWS CLI: Show**
-2. วางทั้งก้อน (`aws_access_key_id`, `aws_secret_access_key`, `aws_session_token`) ลง `~/.aws/credentials` (Windows: `C:\Users\<ชื่อ>\.aws\credentials`)
-3. ตั้ง region เป็น `us-east-1` (ตัวแปร `region` default ตรงกันแล้ว)
-4. เช็ก: `aws sts get-caller-identity` ต้องเห็น account id ของบัญชีใหม่
+1. ใน AWS console: IAM → Users → สร้าง user (เช่น `view-admin`) แนบ `AdministratorAccess` แล้วสร้าง **Access key** แบบ CLI (เก็บ secret ไว้เอง ห้าม commit/ห้ามส่งในแชต)
+2. `aws configure` ใส่ access key, secret, region `ap-southeast-2`, output `json`
+3. เช็ก: `aws sts get-caller-identity` ต้องเห็น account id ของบัญชีนี้
 
-credentials ของ Learner Lab หมดอายุทุก session (เจอ `ExpiredToken` / `InvalidClientTokenId` ให้ทำขั้นนี้ใหม่) ทำงานในบัญชีนี้ได้อย่างเดียว ไม่สร้าง IAM role เองได้ ทุก service ใช้ `LabRole` ที่มีอยู่
+บัญชี AWS "Projects" (Free plan) มี SCP ที่ AWS ตั้งไว้: ใช้ได้แค่ region ที่เลือกตอนสมัคร region อื่นจะได้ `explicit deny in a service control policy` ทุกบริการ (แก้ไม่ได้ด้วย IAM) อย่ากด "Activate advanced features" (ย้อนไม่ได้ และลบ spend limit ของบัญชี)
 
 ### ขั้น 2: เอาโค้ดมา
 
@@ -83,8 +83,7 @@ cd cloud/infra
    python cloud/ingest/make_token.py IOTW-A002
    ```
    ได้ 3 บรรทัดต่อเครื่อง: `token` เก็บไว้ใน `secrets.h` ของบอร์ด (ห้าม commit, ห้ามใส่ใน tfvars) ส่วนบรรทัด `tfvars` คือ hash ที่จะคัดลอกไปใส่ในขั้นถัดไป
-2. หาเลข version ล่าสุดของ layer `AWSSDKPandas-Python312` ใน us-east-1 ที่ https://aws-sdk-pandas.readthedocs.io/en/stable/layers.html
-3. คัดลอกไฟล์ตัวอย่างแล้วแก้ 4 ค่าในส่วน "ต้องแก้":
+2. คัดลอกไฟล์ตัวอย่างแล้วแก้ค่าในส่วน "ต้องแก้":
    ```bash
    cp terraform.tfvars.example terraform.tfvars    # ห้าม commit ไฟล์นี้ (gitignore ไว้แล้ว)
    ```
@@ -92,24 +91,26 @@ cd cloud/infra
    |---|---|
    | `bucket_name` | `digitaltwin-lake-<account-id>` (ไม่ซ้ำทั่วโลก; `aws sts get-caller-identity` ให้ account id) |
    | `device_token_hashes` | บรรทัด `tfvars` จากขั้น 3.1 ของทุกอุปกรณ์ |
-   | `alert_email` | อีเมลที่รับแจ้งเตือน pipeline ล้มเหลว |
-   | `pandas_layer_arn` | ARN จากขั้น 3.2 พร้อมเลข version จริง |
+   | `alert_email` | อีเมลที่รับแจ้งเตือน pipeline ล้มเหลว + budget alert (R7) |
+   | `gee_wif.provider_id` | provider ของ AWS account นี้ใน pool ของ GEE (ขั้น 6) |
+
+   pandas layer ไม่ต้องใส่: ใช้ layer สาธารณะ `AWSSDKPandas-Python312` ของ region ตาม `pandas_layer_version` (default 31 ตรวจแล้วว่ามีใน ap-southeast-2) override ทั้ง ARN ได้ด้วย `pandas_layer_arn`
 
    ส่วนอื่นของ tfvars ปล่อยไว้ตามตัวอย่างได้ (IoT เปิดอยู่ ดาวเทียมปิดอยู่)
 
-### ขั้น 4: Deploy ส่วน IoT
+### ขั้น 4: Deploy
 
 ```bash
-terraform init          # ดาวน์โหลด provider (ต้องออกเน็ตได้ถึง registry.terraform.io)
-terraform plan          # อ่านผลก่อน อ่านรายการ resource ที่จะสร้างให้ครบ
-terraform apply
+python cloud/infra/deploy.py --plan   # build เว็บ + terraform plan อ่านรายการ resource ก่อน
+python cloud/infra/deploy.py          # build เว็บ (web/dist) → terraform init (ครั้งแรก) → apply → พิมพ์ URL
 ```
+ต้อง build เว็บก่อน apply ทุกครั้งที่เว็บเปลี่ยน เพราะ Terraform อ่านรายชื่อไฟล์ใน `web/dist` ตอน plan (`deploy.py` ทำให้เอง) วาง `buildings.geojson` ไว้ที่ `web/public/data/` ก่อน build ถ้าจะแสดงอาคารจริง (D26)
 
 สิ่งที่เกิดขึ้นตอน apply ครั้งแรก:
 - state เก็บใน `terraform.tfstate` ข้าง `main.tf` (ใน home ของ CloudShell ไม่หายเมื่อปิด session) ถ้าไฟล์นี้หาย Terraform จะจำ resource ที่สร้างไปไม่ได้ ควรสำรองไว้หลัง apply เช่น `aws s3 cp terraform.tfstate s3://<bucket>/backup/terraform.tfstate`
 - module `storage` สร้าง S3 bucket ด้วย AWS CLI (`terraform_data` + `local-exec`) ถ้ามี bucket ชื่อนี้อยู่แล้วจะข้ามไป
 - ได้ Lambda ingest + HTTP API, Step Functions pipeline + Scheduler ทุกชั่วโมงนาทีที่ 5 (เวลาไทย), Glue database `iot_walking` + Athena workgroup, API ให้เว็บ, และ EC2 relay + Elastic IP + realtime hub
-- EC2 ติดตั้ง relay/hub เองผ่าน user-data ตอนบูตครั้งแรก รอประมาณ 2-3 นาทีหลัง apply จบ service ถึงจะขึ้น (ตั้ง `systemd enable` ไว้ ถ้า Learner Lab หยุดเครื่องแล้วเปิดใหม่ service จะขึ้นเอง และ Elastic IP คงเดิม)
+- EC2 ติดตั้ง relay/hub เองผ่าน user-data ตอนบูตครั้งแรก รอประมาณ 2-3 นาทีหลัง apply จบ service ถึงจะขึ้น (ตั้ง `systemd enable` ไว้ ถ้าเครื่องถูกหยุดแล้วเปิดใหม่ service จะขึ้นเอง และ Elastic IP คงเดิม)
 
 จด URL ที่ต้องใช้ต่อ:
 
@@ -135,8 +136,10 @@ bash healthcheck.sh            # เพิ่ม --no-gee ถ้าไม่อ�
 4. **ตรวจ catalog:** ใช้ query ใน "ทดสอบ catalog หลัง apply" ด้านล่าง
 5. **ตรวจ API:** `curl "$(terraform output -raw api_url)/devices"` ต้องได้รายชื่ออุปกรณ์กลับมา
 
-บัญชีใหม่เริ่มจากข้อมูลว่าง IoT จะมีข้อมูลหลังบอร์ดอัปโหลดรอบแรก ถ้าบอร์ดเก็บข้อมูลค้างใน SD จะ backfill ให้เองตอนส่ง
-
+บัญชีใหม่เริ่มจากข้อมูลว่าง IoT จะมีข้อมูลหลังบอร์ดอัปโหลดรอบแรก ถ้าบอร์ดเก็บข้อมูลค้างใน SD จะ backfill ให้เองตอนส่ง
+
+
+
 **เติมข้อมูลย้อนหลังทีเดียว (R8):** หลัง apply ครบทุกขั้น (รวมดาวเทียม) รัน
 
 ```bash
@@ -154,7 +157,7 @@ python cloud/infra/post_apply.py --all --iot-files iot/tools/raw/tu_20261120/*.c
 
 **ทำก่อน (นอก AWS):** ฝั่ง Google ต้องให้ AWS account ใหม่เข้ามาได้ เพราะ Lambda ยืนยันตัวกับ GEE ด้วย WIF ของ project ที่เป็นของ Get ต้องขอให้เจ้าของ project:
 - เพิ่ม AWS account id ใหม่ให้ AWS provider ของ identity pool (`gee_wif.pool_id` / `provider_id`)
-- ให้สิทธิ์ `roles/iam.workloadIdentityUser` กับ principal ของ `LabRole` ของบัญชีใหม่ บน service account `gee_wif.service_account`
+- ให้ attribute condition ของ provider อนุญาต `arn:aws:sts::<account>:assumed-role/iot-dt-satellite-lambda` และให้สิทธิ์ `roles/iam.workloadIdentityUser` กับ principalSet `.../attribute.aws_role/<ค่า terraform output satellite_wif_role>` บน service account `gee_wif.service_account` (role ยังไม่ต้องมีจริงก็ตั้งล่วงหน้าได้ ชื่อคงที่)
 
 แต่ละ AWS account ใช้ **provider คนละตัว** ใน pool เดียวกัน (provider ผูกกับ account id) ค่า default ของ `gee_wif.provider_id` ใน `variables.tf` เป็นของอีก account ถ้า account นี้มี provider แล้ว ให้ override ใน `terraform.tfvars` เช่น `gee_wif = { project_number = "959910184696", pool_id = "6609650251", provider_id = "aws-view", service_account = "service-gee-iot@turnkey-tribute-511903-t6.iam.gserviceaccount.com" }` อาการถ้าใช้ provider ผิดตัว: `invalid_grant: Specified AWS account ID ... not found in the configured identity provider`
 
@@ -198,14 +201,16 @@ terraform apply -target=module.catalog -target=module.curated_merge
 
 | อาการ | สาเหตุ / วิธีแก้ |
 |---|---|
-| `no space left on device` ตอน apply (CloudShell) | home เต็ม: **อย่าปิดหน้าต่างและอย่า apply ซ้ำ** ลบ `~/.cache/pip`, `cloud/satellite/layer/build/`, `.terraform/` (รัน `bash setup-cloudshell.sh` ดูพื้นที่ที่เหลือได้) แล้วคัดลอก JSON ของ state ที่ Terraform พิมพ์ไว้ในหน้าจอ (ตั้งแต่ `{` แรกถึง `}` สุดท้าย) ลง `errored.tfstate` แล้ว `terraform state push errored.tfstate` จากนั้นตั้ง `TF_DATA_DIR` ตามขั้น 0 แล้ว init + apply ใหม่ ถ้ากู้ state ไม่ได้ ใน Learner Lab กด Reset lab แล้วเริ่มใหม่ |
-| `ExpiredToken` / `InvalidClientTokenId` | credentials ของ Learner Lab หมดอายุ ทำขั้น 1 ใหม่ |
-| apply ล้มตอน `terraform_data.bucket` (`aws: command not found` / `bash`) | เครื่องไม่มี aws หรือ bash ใช้ CloudShell หรือสร้าง bucket เอง `aws s3api create-bucket --bucket <ชื่อ> --region us-east-1` แล้ว apply ซ้ำ (จะข้ามการสร้าง) |
+| `no space left on device` ตอน apply (CloudShell) | home เต็ม: **อย่าปิดหน้าต่างและอย่า apply ซ้ำ** ลบ `~/.cache/pip`, `cloud/satellite/layer/build/`, `.terraform/` (รัน `bash setup-cloudshell.sh` ดูพื้นที่ที่เหลือได้) แล้วคัดลอก JSON ของ state ที่ Terraform พิมพ์ไว้ในหน้าจอ (ตั้งแต่ `{` แรกถึง `}` สุดท้าย) ลง `errored.tfstate` แล้ว `terraform state push errored.tfstate` จากนั้นตั้ง `TF_DATA_DIR` ตามขั้น 0 แล้ว init + apply ใหม่ ถ้ากู้ state ไม่ได้ ต้อง import resource เข้า state ใหม่ หรือลบ resource ใน console แล้ว apply ใหม่ |
+| `ExpiredToken` / `InvalidClientTokenId` | access key ผิดหรือถูกลบ ทำขั้น 1 ใหม่ |
+| `explicit deny in a service control policy` | ใช้ region ผิด บัญชีนี้ใช้ได้แค่ `ap-southeast-2` เช็ก `aws configure get region` และตัวแปร `region` |
+| apply ล้มตอน `terraform_data.bucket` (`aws: command not found` / `bash`) | เครื่องไม่มี aws หรือ bash ใช้ CloudShell หรือสร้าง bucket เอง `aws s3api create-bucket --bucket <ชื่อ> --region ap-southeast-2 --create-bucket-configuration LocationConstraint=ap-southeast-2` แล้ว apply ซ้ำ (จะข้ามการสร้าง) |
 | `BucketAlreadyExists` | ชื่อ bucket ซ้ำทั่วโลก เปลี่ยน `bucket_name` |
 | `AccessDenied` ที่ `s3:GetBucketObjectLockConfiguration` | เกิดถ้าใช้ resource `aws_s3_bucket` ตรงๆ module `storage` เลี่ยงไว้แล้ว อย่าเปลี่ยนไปใช้ resource นั้น |
 | build layer ล้ม (`python: command not found`, pip ล้มเหลว) | ตั้ง `python_cmd = "python3"` และเช็กว่าออกเน็ตได้ หรือ build เองแล้วตั้ง `gee_layer_zip` |
-| Step Functions / Scheduler รันไม่ขึ้นเพราะสิทธิ์ | เช็ก trust policy ของ `LabRole` ว่ามี `scheduler.amazonaws.com` และ `states.amazonaws.com` |
-| `satellite_test` error ตอนแลก token | ฝั่ง Google ยังไม่เพิ่ม AWS account ใหม่ (ขั้น 6) |
+| Step Functions / Scheduler รันไม่ขึ้นเพราะสิทธิ์ | ดู role `iot-dt-sfn` / `iot-dt-trigger` ใน module `iam` (trust `states`, `events`, `scheduler`) |
+| budget สร้างไม่ได้ (`AccessDenied` ที่ budgets) | ตั้ง `budget_limit_usd = 0` แล้ว apply ใหม่ ยังมี spend limit ของบัญชีกันอยู่ |
+| `satellite_test` error ตอนแลก token | ฝั่ง Google ยังไม่เพิ่ม AWS account / role ใหม่ หรือ `gee_wif.provider_id` ไม่ตรง (ขั้น 6) |
 | `AlreadyExists` ของตาราง Glue | ตารางเดิมที่สร้างนอก Terraform ลบรายการนั้นใน Glue แล้ว apply ใหม่ |
 | ไม่ได้อีเมลแจ้งเตือน | ยังไม่กดยืนยันอีเมล SNS (ขั้น 5.1) |
 
@@ -217,10 +222,10 @@ terraform apply -target=module.catalog -target=module.curated_merge
 
 ## อ้างอิง
 
-**bucket:** module `storage` สร้าง bucket ด้วย AWS CLI ผ่าน `terraform_data` + `local-exec` (ต้องมี `aws` และ `bash` ในเครื่องที่รัน เช่น CloudShell) เพราะ resource `aws_s3_bucket` อ่าน Object Lock ของ bucket ทุกครั้ง แต่ SCP ของ Learner Lab ห้าม `s3:GetBucketObjectLockConfiguration` (403) ถ้ามี bucket อยู่แล้วจะข้ามไป Terraform ตั้งค่าเฉพาะ public access block / ownership / encryption / lifecycle / notification และ `terraform destroy` **ไม่ลบ** bucket กับข้อมูลข้างใน
+**bucket:** module `storage` สร้าง bucket ด้วย AWS CLI ผ่าน `terraform_data` + `local-exec` (ต้องมี `aws` และ `bash` ในเครื่องที่รัน Windows ใช้ Git Bash) สืบมาจากสมัย Learner Lab ที่ SCP ห้าม `s3:GetBucketObjectLockConfiguration` ซึ่ง resource `aws_s3_bucket` อ่านทุกครั้ง ใช้กับบัญชีใดก็ได้ ถ้ามี bucket อยู่แล้วจะข้ามไป Terraform ตั้งค่าเฉพาะ public access block / ownership / encryption / lifecycle / notification และ `terraform destroy` **ไม่ลบ** bucket กับข้อมูลข้างใน
 
 **ย้ายไป bucket ใหม่ (เช่นจาก `iot-dt-<account-id>` เป็น `digitaltwin-lake-<account-id>`):** S3 เปลี่ยนชื่อ bucket ไม่ได้ ต้องสร้างใหม่แล้ว copy ข้อมูลไป ส่วนโค้ดอ้างชื่อผ่าน `bucket_name` ตัวเดียว (Lambda env `DATA_BUCKET`, Glue location, EventBridge rule) ยกเว้นตาราง Iceberg `cell_period` ที่เก็บ path เต็มไว้ใน metadata จึงต้องสร้างใหม่ ทำในรอบเดียวกับ D23 ขั้น 4 ได้ เพราะ IoT ต้องรัน force อยู่แล้ว
-1. `aws s3 mb s3://<ใหม่> --region us-east-1` แล้วปิด scheduler ชั่วคราว (`pipeline_schedule_enabled = false`, `satellite_ingest_schedule = ""`, `curated_merge_daily_schedule = ""`) + `terraform apply`
+1. `aws s3 mb s3://<ใหม่> --region ap-southeast-2` แล้วปิด scheduler ชั่วคราว (`pipeline_schedule_enabled = false`, `satellite_ingest_schedule = ""`, `curated_merge_daily_schedule = ""`) + `terraform apply`
 2. `aws s3 sync s3://<เก่า> s3://<ใหม่> --exclude "athena-results/*" --exclude "processed/*" --exclude "curated/cell_period/*"` (`processed/` สร้างใหม่จาก raw ด้วย force, `cell_period` สร้างใหม่ด้วย curated-merge)
 3. `aws glue delete-table --database-name iot_walking --name cell_period` (ลบแค่รายการใน Glue ไม่ลบไฟล์; อย่าใช้ `DROP TABLE` ใน Athena เพราะ Iceberg จะลบไฟล์ด้วย)
 4. แก้ `bucket_name` ใน `terraform.tfvars` เปิด scheduler คืน แล้ว `terraform apply`
@@ -230,10 +235,11 @@ terraform apply -target=module.catalog -target=module.curated_merge
 - บอร์ดและ relay ไม่ต้องแก้ เพราะส่งผ่าน `/ingest` ไม่รู้จักชื่อ bucket
 
 **pipeline:**
-- ต้องใส่ `pandas_layer_arn` (layer AWS SDK for pandas ที่มี pyarrow) ใน `terraform.tfvars` ดูเลข version ล่าสุดของ `AWSSDKPandas-Python312` ใน us-east-1 ได้ที่ https://aws-sdk-pandas.readthedocs.io/en/stable/layers.html
+- layer AWS SDK for pandas (pyarrow) ใช้ของสาธารณะใน region อัตโนมัติ (`pandas_layer_version`) ดู version ที่มีได้ที่ https://aws-sdk-pandas.readthedocs.io/en/stable/layers.html
 - ใส่ `alert_email` แล้วกดยืนยันในอีเมลจาก AWS หนึ่งครั้ง ไม่งั้นจะไม่ได้รับแจ้งเตือน
 - ปิดรอบอัตโนมัติด้วย `pipeline_schedule_enabled = false` (รันมือได้ ดู `cloud/pipeline/README.md`)
-- Scheduler และ Step Functions ใช้ `LabRole` ถ้า apply แล้วรันไม่ขึ้นเพราะสิทธิ์ ให้เช็ก trust policy ของ LabRole ว่ามี `scheduler.amazonaws.com` และ `states.amazonaws.com`
+- Step Functions ใช้ role `iot-dt-sfn` และ Scheduler/EventBridge ใช้ `iot-dt-trigger` (module `iam`)
+- IoT ที่มาช้ากี่วันก็ถูกทำ: ingest เขียน `raw/_pending/iot/<batch_id>` แล้ว `plan_batches` หยิบทุก batch ที่ค้าง (lookback 6 ชม. เป็นตาข่าย)
 
 **catalog (Glue + Athena):**
 - ใช้ partition projection ไม่ต้องรัน crawler / `MSCK REPAIR TABLE` ไฟล์ใหม่ query ได้ทันที
@@ -249,7 +255,7 @@ terraform apply -target=module.catalog -target=module.curated_merge
 **api:**
 - URL ดูจาก `terraform output api_url` ส่วนวิธีเรียก/ทดสอบดู `cloud/api/README.md`
 - CORS default `["*"]` เมื่อเว็บ (#35) มีโดเมนแล้วให้ใส่ `api_allowed_origins` ใน `terraform.tfvars`
-- Lambda เรียก Athena / Glue / S3 ด้วย `LabRole` ถ้าได้ 502 ให้ดู log `/aws/lambda/iot-dt-api`
+- Lambda เรียก Athena / Glue / S3 ด้วย role `iot-dt-api-lambda` ถ้าได้ 502 ให้ดู log `/aws/lambda/iot-dt-api`
 
 ทดสอบ catalog หลัง apply (CloudShell):
 

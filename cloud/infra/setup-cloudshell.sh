@@ -40,7 +40,7 @@ python3 -m pip --version >/dev/null 2>&1 && ok "pip" || warn "ไม่มี pi
 echo "== AWS credentials"
 acct=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) \
   && ok "account $acct region ${AWS_REGION:-${AWS_DEFAULT_REGION:-?}}" \
-  || warn "credentials ใช้ไม่ได้ (Learner Lab หมด session? ดูขั้น 1 ใน README)"
+  || warn "credentials ใช้ไม่ได้ (ดูขั้น 1 ใน cloud/infra/README.md)"
 
 echo "== ตำแหน่ง repo"
 case "$HERE" in

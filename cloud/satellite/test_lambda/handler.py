@@ -1,7 +1,7 @@
 """GEE connectivity test Lambda (issue #25, spec 50).
 
 Authenticates to Google Earth Engine with Workload Identity Federation: the
-Lambda's own AWS credentials (LabRole) are exchanged for a short-lived Google
+Lambda's own AWS credentials (role iot-dt-satellite-lambda) are exchanged for a short-lived Google
 token, so no service-account key is stored in the repo or in SSM.
 
 Env (set by cloud/infra/modules/satellite):

@@ -7,11 +7,11 @@
 
 ## ยืนยันตัวกับ GEE (#25)
 
-ใช้ **Workload Identity Federation (WIF)** แทน service-account key: Lambda เอา credentials ของ `LabRole` ไปแลกเป็น token ของ Google แล้ว impersonate service account `service-gee-iot@turnkey-tribute-511903-t6.iam.gserviceaccount.com` จึงไม่มี key ใน repo หรือใน SSM
+ใช้ **Workload Identity Federation (WIF)** แทน service-account key: Lambda เอา credentials ของ role ตัวเอง (`iot-dt-satellite-lambda`) ไปแลกเป็น token ของ Google แล้ว impersonate service account `service-gee-iot@turnkey-tribute-511903-t6.iam.gserviceaccount.com` จึงไม่มี key ใน repo หรือใน SSM
 
 ค่า WIF (project number, pool, provider, service account) อยู่ในตัวแปร `gee_wif` ของ `cloud/infra/variables.tf` ไม่ใช่ความลับ Terraform สร้างเป็น JSON ส่งเข้า env `GEE_WIF_CONFIG` ของ Lambda ถ้าเปลี่ยน project (spec 50 ทาง ข) ให้ override `gee_project`, `gee_assets`, `gee_wif` ใน `terraform.tfvars` โดยไม่ต้องแก้โค้ด
 
-ฝั่ง Google ต้องมี: identity pool + AWS provider ที่ผูกกับ AWS account ของ Learner Lab, สิทธิ์ `roles/iam.workloadIdentityUser` ให้ principal ของ `LabRole` บน service account และ asset ที่แชร์ให้ service account แล้ว
+ฝั่ง Google ต้องมี: identity pool + AWS provider ที่ผูกกับ AWS account ของเรา (ตอนนี้ provider `viewwyeiei` = account 006096426825, attribute condition อนุญาต `arn:aws:sts::<account>:assumed-role/iot-dt-satellite-lambda`), สิทธิ์ `roles/iam.workloadIdentityUser` ให้ principalSet `.../attribute.aws_role/<ค่า terraform output satellite_wif_role>` บน service account และ asset ที่แชร์ให้ service account แล้ว
 
 ## สร้าง layer แล้ว deploy
 
@@ -34,7 +34,7 @@ aws lambda invoke --function-name iot-dt-satellite-test --payload '{}' \
 # {"status": "ok", "calc_result": 2, "asset_path": "...laksi_boundary", "feature_count": 2}
 ```
 
-ถ้าล้มเหลว invocation จะขึ้น error (ดู log `/aws/lambda/iot-dt-satellite-test`) สาเหตุที่พบบ่อย: AWS account ของ Learner Lab ไม่ตรงกับที่ผูกใน provider, service account ยังไม่ได้สิทธิ์ `workloadIdentityUser`, asset ยังไม่ได้แชร์
+ถ้าล้มเหลว invocation จะขึ้น error (ดู log `/aws/lambda/iot-dt-satellite-test`) สาเหตุที่พบบ่อย: AWS account ไม่ตรงกับที่ผูกใน provider หรือ role ไม่อยู่ใน attribute condition, service account ยังไม่ได้สิทธิ์ `workloadIdentityUser`, asset ยังไม่ได้แชร์
 
 ## satellite_ingest (#27)
 
@@ -68,12 +68,12 @@ timeout ของ Lambda สูงสุด 900 s พอสำหรับปร
 
 ```bash
 # ดึงรายฉากทีละ 2 เดือน (composite ของฤดูในช่วงนั้นสร้างให้อัตโนมัติ)
-aws lambda invoke --function-name iot-dt-satellite-ingest --region us-east-1 \
+aws lambda invoke --function-name iot-dt-satellite-ingest --region ap-southeast-2 \
   --cli-binary-format raw-in-base64-out \
   --payload '{"mode": "ingest", "start_date": "2024-01-01", "end_date": "2024-03-01"}' out.json
 
 # สร้าง composite หน้าร้อนของปีหนึ่งโดยตรง / บังคับสร้างใหม่
-aws lambda invoke --function-name iot-dt-satellite-ingest --region us-east-1 \
+aws lambda invoke --function-name iot-dt-satellite-ingest --region ap-southeast-2 \
   --cli-binary-format raw-in-base64-out \
   --payload '{"mode": "composite", "year": 2024, "force": true}' out.json
 

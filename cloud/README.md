@@ -1,6 +1,6 @@
 # cloud/
 
-ทุกอย่างบน AWS (Learner Lab, region us-east-1, ทุกบริการใช้ `LabRole`)
+ทุกอย่างบน AWS account ของตัวเอง region `ap-southeast-2` แต่ละบริการมี IAM role ของตัวเอง (module `iam`, D27) deploy ด้วย `python cloud/infra/deploy.py`
 
 | โฟลเดอร์ | เนื้อหา | รันที่ |
 |---|---|---|
