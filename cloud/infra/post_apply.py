@@ -12,8 +12,9 @@ Steps (in this order, each can be run alone; all are safe to repeat):
              --since, so those years get their season composite too. Then the building grid. Every finished
              batch starts the satellite pipeline by itself (S3 _COMPLETE rule); the script
              waits until none is running. The curated-merge and analytics triggers are
-             switched off meanwhile (one merge instead of one per scene) and always
-             switched back on at the end.
+             switched off meanwhile and through `merge` (one merge + one analytics run
+             instead of one per scene/period, which floods Lambda concurrency and the
+             alert email) and always switched back on at the end.
   merge      one curated-merge run over every stale period, then one analytics run.
 
 Usage:
@@ -255,14 +256,17 @@ def main() -> None:
 
     if "iot" in steps:
         step_iot(aws, out, a)
-    if "satellite" in steps:
+    if "satellite" in steps or "merge" in steps:
+        # Off until merge is done: every period marker merge writes would otherwise start
+        # its own analytics run (Lambda 429 + one alert email each).
         aws.set_rules(rules, enabled=False)
         try:
-            step_satellite(aws, out, a)
+            if "satellite" in steps:
+                step_satellite(aws, out, a)
+            if "merge" in steps:
+                step_merge(aws, out)
         finally:
             aws.set_rules(rules, enabled=True)
-    if "merge" in steps:
-        step_merge(aws, out)
     log("done")
 
 

@@ -10,12 +10,18 @@
           "ErrorEquals": [
             "Lambda.ServiceException",
             "Lambda.AWSLambdaException",
-            "Lambda.SdkClientException",
-            "Lambda.TooManyRequestsException"
+            "Lambda.SdkClientException"
           ],
           "IntervalSeconds": 2,
           "MaxAttempts": 2,
           "BackoffRate": 2
+        },
+        {
+          "ErrorEquals": ["Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 10,
+          "MaxAttempts": 6,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
         }
       ],
       "Catch": [
@@ -63,12 +69,18 @@
           "ErrorEquals": [
             "Lambda.ServiceException",
             "Lambda.AWSLambdaException",
-            "Lambda.SdkClientException",
-            "Lambda.TooManyRequestsException"
+            "Lambda.SdkClientException"
           ],
           "IntervalSeconds": 2,
           "MaxAttempts": 2,
           "BackoffRate": 2
+        },
+        {
+          "ErrorEquals": ["Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 10,
+          "MaxAttempts": 6,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
         }
       ],
       "Catch": [
@@ -106,12 +118,18 @@
           "ErrorEquals": [
             "Lambda.ServiceException",
             "Lambda.AWSLambdaException",
-            "Lambda.SdkClientException",
-            "Lambda.TooManyRequestsException"
+            "Lambda.SdkClientException"
           ],
           "IntervalSeconds": 2,
           "MaxAttempts": 2,
           "BackoffRate": 2
+        },
+        {
+          "ErrorEquals": ["Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 10,
+          "MaxAttempts": 6,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
         }
       ],
       "Catch": [
@@ -133,12 +151,18 @@
           "ErrorEquals": [
             "Lambda.ServiceException",
             "Lambda.AWSLambdaException",
-            "Lambda.SdkClientException",
-            "Lambda.TooManyRequestsException"
+            "Lambda.SdkClientException"
           ],
           "IntervalSeconds": 2,
           "MaxAttempts": 2,
           "BackoffRate": 2
+        },
+        {
+          "ErrorEquals": ["Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 10,
+          "MaxAttempts": 6,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
         }
       ],
       "Catch": [
@@ -160,12 +184,18 @@
           "ErrorEquals": [
             "Lambda.ServiceException",
             "Lambda.AWSLambdaException",
-            "Lambda.SdkClientException",
-            "Lambda.TooManyRequestsException"
+            "Lambda.SdkClientException"
           ],
           "IntervalSeconds": 2,
           "MaxAttempts": 2,
           "BackoffRate": 2
+        },
+        {
+          "ErrorEquals": ["Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 10,
+          "MaxAttempts": 6,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
         }
       ],
       "Catch": [
@@ -187,12 +217,18 @@
           "ErrorEquals": [
             "Lambda.ServiceException",
             "Lambda.AWSLambdaException",
-            "Lambda.SdkClientException",
-            "Lambda.TooManyRequestsException"
+            "Lambda.SdkClientException"
           ],
           "IntervalSeconds": 2,
           "MaxAttempts": 2,
           "BackoffRate": 2
+        },
+        {
+          "ErrorEquals": ["Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 10,
+          "MaxAttempts": 6,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
         }
       ],
       "Catch": [
